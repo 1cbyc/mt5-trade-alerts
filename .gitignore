@@ -23,3 +23,10 @@ config.env
 *.swo
 *~
 
+# Exclude all markdown files except README.md
+*.md
+!README.md
+
+# Setup scripts (not needed in repo)
+GITHUB_SETUP.md
+push_to_github.ps1

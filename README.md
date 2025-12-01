@@ -211,7 +211,12 @@ Contributions are welcome! Feel free to open issues or submit pull requests.
 
 ## Support
 
-For issues or questions, check the logs first bef. Common issues are usually related to:
+For issues or questions, check the logs first. If you need help:
+
+- 🐛 [Create an issue](https://github.com/1cbyc/mt5-trade-alerts/issues/new) on GitHub
+- 📱 Reach me on [x.com/1cbyc](https://x.com/1cbyc)
+
+Common issues are usually related to:
 - Incorrect credentials
 - MT5 terminal not accessible
 - Telegram bot not properly configured
