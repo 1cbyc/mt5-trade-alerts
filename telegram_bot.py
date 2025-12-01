@@ -132,6 +132,37 @@ class TelegramNotifier:
         message = self.format_price_alert(alert)
         return await self.send_message(message)
     
+    def format_profit_suggestion(self, suggestion: dict) -> str:
+        """Format profit-taking suggestion for Telegram"""
+        symbol = suggestion.get('symbol', 'N/A')
+        ticket = suggestion.get('ticket', 'N/A')
+        trade_type = suggestion.get('type', 'N/A')
+        volume = suggestion.get('volume', 0)
+        volume_to_close = suggestion.get('volume_to_close', 0)
+        profit = suggestion.get('profit', 0)
+        profit_pct = suggestion.get('profit_percentage', 0)
+        price_open = suggestion.get('price_open', 0)
+        price_current = suggestion.get('price_current', 0)
+        
+        emoji = "💡"
+        
+        message = f"{emoji} <b>Profit-Taking Suggestion</b>\n\n"
+        message += f"Symbol: {symbol}\n"
+        message += f"Ticket: {ticket}\n"
+        message += f"Type: {trade_type}\n"
+        message += f"Current Profit: 💰 {profit:.2f} ({profit_pct:.2f}%)\n"
+        message += f"Open Price: {price_open}\n"
+        message += f"Current Price: {price_current}\n"
+        message += f"\n💡 <b>Suggestion:</b> Consider closing {volume_to_close} lots (50% of position) to secure profits\n"
+        message += f"Remaining: {volume - volume_to_close} lots"
+        
+        return message
+    
+    async def send_profit_suggestion(self, suggestion: dict) -> bool:
+        """Send profit-taking suggestion to Telegram"""
+        message = self.format_profit_suggestion(suggestion)
+        return await self.send_message(message)
+    
     async def send_test_message(self) -> bool:
         """Send a test message to verify connection"""
         message = "🤖 <b>MT5 Trade Alerts Bot</b>\n\nBot is connected and ready!"
