@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+*.env
+config.env
+*.log
+.DS_Store
+
+# User-specific configuration (if users want to keep their own price levels private)
+# price_levels.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+

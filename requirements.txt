@@ -1,0 +1,4 @@
+MetaTrader5==5.0.45
+python-telegram-bot==20.7
+python-dotenv==1.0.0
+

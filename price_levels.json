@@ -1,0 +1,17 @@
+{
+  "EURUSD": [
+    {
+      "id": "resistance_1",
+      "price": 1.1000,
+      "type": "above",
+      "description": "Key resistance level"
+    },
+    {
+      "id": "support_1",
+      "price": 1.0900,
+      "type": "below",
+      "description": "Key support level"
+    }
+  ]
+}
+
