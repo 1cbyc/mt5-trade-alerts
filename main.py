@@ -26,6 +26,8 @@ class MT5AlertService:
         self.running = False
         self.price_levels = {}
         self.triggered_levels = set()
+        self.monitored_symbols = set()
+        self.sent_profit_suggestions = set()  # Track sent suggestions to avoid spam
     
     async def initialize(self):
         """Initialize MT5 and Telegram connections"""
@@ -66,6 +68,10 @@ class MT5AlertService:
         if self.price_levels:
             logger.info(f"Loaded price levels for {len(self.price_levels)} symbols")
         
+        # Initialize monitored symbols from config
+        self.monitored_symbols = set(Config.MONITORED_SYMBOLS)
+        logger.info(f"Monitoring synthetic indices: {', '.join(self.monitored_symbols)}")
+        
         return True
     
     async def check_trades(self):
@@ -93,6 +99,7 @@ class MT5AlertService:
         if not Config.ENABLE_PRICE_ALERTS:
             return
         
+        # Check configured price levels
         for symbol, levels in self.price_levels.items():
             triggered = self.mt5_monitor.check_price_levels(symbol, levels)
             for alert in triggered:
@@ -102,6 +109,37 @@ class MT5AlertService:
                     await self.telegram.send_price_alert(alert)
                     self.triggered_levels.add(level_key)
     
+    async def update_monitored_symbols(self):
+        """Update list of symbols to monitor based on active positions/orders"""
+        active_instruments = self.mt5_monitor.get_active_instruments()
+        
+        # Add synthetic indices from config
+        for symbol in Config.MONITORED_SYMBOLS:
+            active_instruments.add(symbol)
+        
+        # Update monitored symbols
+        new_symbols = active_instruments - self.monitored_symbols
+        if new_symbols:
+            logger.info(f"New instruments detected: {', '.join(new_symbols)}")
+            self.monitored_symbols.update(new_symbols)
+    
+    async def check_profit_suggestions(self):
+        """Check for profitable positions and suggest partial closes"""
+        if not Config.ENABLE_PROFIT_SUGGESTIONS:
+            return
+        
+        suggestions = self.mt5_monitor.analyze_profitable_positions(
+            min_profit=Config.MIN_PROFIT_FOR_SUGGESTION,
+            profit_percentage=Config.PROFIT_PERCENTAGE_THRESHOLD
+        )
+        
+        for suggestion in suggestions:
+            suggestion_key = f"profit_{suggestion['ticket']}"
+            if suggestion_key not in self.sent_profit_suggestions:
+                logger.info(f"Profit suggestion for {suggestion['symbol']} - Ticket {suggestion['ticket']}: {suggestion['profit']:.2f}")
+                await self.telegram.send_profit_suggestion(suggestion)
+                self.sent_profit_suggestions.add(suggestion_key)
+    
     async def run(self):
         """Main event loop"""
         if not await self.initialize():
@@ -110,6 +148,10 @@ class MT5AlertService:
         
         self.running = True
         logger.info("MT5 Alert Service started. Monitoring trades, orders, and price levels...")
+        logger.info(f"Monitoring synthetic indices: {', '.join(Config.MONITORED_SYMBOLS)}")
+        
+        # Counter for periodic tasks
+        check_counter = 0
         
         try:
             while self.running:
@@ -119,11 +161,20 @@ class MT5AlertService:
                 # Check orders
                 await self.check_orders()
                 
-                # Check price levels
+                # Update monitored symbols (every 5 cycles = ~25 seconds)
+                if check_counter % 5 == 0:
+                    await self.update_monitored_symbols()
+                
+                # Check price levels for all monitored symbols
                 await self.check_price_levels()
+                
+                # Check profit suggestions (every 3 cycles = ~15 seconds)
+                if check_counter % 3 == 0:
+                    await self.check_profit_suggestions()
                 
                 # Wait before next check
                 await asyncio.sleep(Config.PRICE_CHECK_INTERVAL)
+                check_counter += 1
         
         except KeyboardInterrupt:
             logger.info("Received shutdown signal")
