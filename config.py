@@ -23,6 +23,14 @@ class Config:
     ENABLE_ORDER_ALERTS = os.getenv('ENABLE_ORDER_ALERTS', 'true').lower() == 'true'
     ENABLE_PRICE_ALERTS = os.getenv('ENABLE_PRICE_ALERTS', 'true').lower() == 'true'
     
+    # Synthetic Indices to Monitor (comma-separated)
+    MONITORED_SYMBOLS = [s.strip() for s in os.getenv('MONITORED_SYMBOLS', 'Volatility 25 Index,Step Index').split(',') if s.strip()]
+    
+    # Profit-taking Settings
+    ENABLE_PROFIT_SUGGESTIONS = os.getenv('ENABLE_PROFIT_SUGGESTIONS', 'true').lower() == 'true'
+    MIN_PROFIT_FOR_SUGGESTION = float(os.getenv('MIN_PROFIT_FOR_SUGGESTION', '10.0'))  # Minimum profit to suggest closing
+    PROFIT_PERCENTAGE_THRESHOLD = float(os.getenv('PROFIT_PERCENTAGE_THRESHOLD', '5.0'))  # Suggest if profit is X% of account
+    
     @staticmethod
     def load_price_levels() -> Dict[str, List[Dict]]:
         """Load price level configurations from JSON file"""
