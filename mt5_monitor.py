@@ -262,4 +262,61 @@ class MT5Monitor:
                 })
         
         return triggered
+    
+    def get_active_instruments(self) -> set:
+        """Get all instruments with active positions or orders"""
+        if not self.connected:
+            return set()
+        
+        instruments = set()
+        
+        # Get instruments from positions
+        positions = mt5.positions_get()
+        if positions:
+            for pos in positions:
+                instruments.add(pos.symbol)
+        
+        # Get instruments from orders
+        orders = mt5.orders_get()
+        if orders:
+            for order in orders:
+                instruments.add(order.symbol)
+        
+        return instruments
+    
+    def analyze_profitable_positions(self, min_profit: float = 10.0, profit_percentage: float = 5.0) -> List[Dict]:
+        """Analyze positions and suggest partial closes for profitable trades"""
+        if not self.connected:
+            return []
+        
+        suggestions = []
+        positions = mt5.positions_get()
+        
+        if not positions:
+            return []
+        
+        account_info = mt5.account_info()
+        account_balance = account_info.balance if account_info else 0
+        
+        for pos in positions:
+            if pos.profit >= min_profit:
+                # Calculate profit as percentage of account
+                profit_pct = (pos.profit / account_balance * 100) if account_balance > 0 else 0
+                
+                # Suggest if profit meets threshold
+                if profit_pct >= profit_percentage or pos.profit >= min_profit * 2:
+                    suggestions.append({
+                        'ticket': pos.ticket,
+                        'symbol': pos.symbol,
+                        'type': 'BUY' if pos.type == mt5.ORDER_TYPE_BUY else 'SELL',
+                        'volume': pos.volume,
+                        'volume_to_close': round(pos.volume / 2, 2),  # Suggest closing half
+                        'price_open': pos.price_open,
+                        'price_current': pos.price_current,
+                        'profit': pos.profit,
+                        'profit_percentage': round(profit_pct, 2),
+                        'time': datetime.fromtimestamp(pos.time).strftime('%Y-%m-%d %H:%M:%S')
+                    })
+        
+        return suggestions
 
