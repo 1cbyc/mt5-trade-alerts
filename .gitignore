@@ -8,6 +8,7 @@ venv/
 ENV/
 .venv
 *.env
+!*.example.env
 config.env
 *.log
 .DS_Store
