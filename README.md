@@ -211,10 +211,10 @@ Contributions are welcome! Feel free to open issues or submit pull requests.
 
 ## Support
 
-For issues or questions, check the logs first. If you need help:
+For issues or questions, check the logs first. If you still need help, then:
 
-- 🐛 [Create an issue](https://github.com/1cbyc/mt5-trade-alerts/issues/new) on GitHub
-- 📱 Reach me on [x.com/1cbyc](https://x.com/1cbyc)
+- [Create an issue](https://github.com/1cbyc/mt5-trade-alerts/issues/new) on GitHub
+- Or, reach me on [x.com/1cbyc](https://x.com/1cbyc)
 
 Common issues are usually related to:
 - Incorrect credentials

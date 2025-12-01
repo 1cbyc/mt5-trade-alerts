@@ -28,5 +28,5 @@ config.env
 !README.md
 
 # Setup scripts (not needed in repo)
-GITHUB_SETUP.md
-push_to_github.ps1
+*.ps1
+*.bat
