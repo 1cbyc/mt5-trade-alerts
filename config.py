@@ -24,7 +24,13 @@ class Config:
     ENABLE_PRICE_ALERTS = os.getenv('ENABLE_PRICE_ALERTS', 'true').lower() == 'true'
     
     # Synthetic Indices to Monitor (comma-separated)
-    MONITORED_SYMBOLS = [s.strip() for s in os.getenv('MONITORED_SYMBOLS', 'Volatility 25 Index,Step Index').split(',') if s.strip()]
+    # Common synthetic indices: Volatility 25 Index, Volatility 50 Index, Volatility 75 Index, Volatility 100 Index
+    # Step Index, Boom 1000 Index, Crash 1000 Index, Jump 50 Index, Jump 75 Index, Jump 100 Index
+    MONITORED_SYMBOLS = [s.strip() for s in os.getenv('MONITORED_SYMBOLS', 'Volatility 25 Index,Volatility 50 Index,Volatility 75 Index,Volatility 100 Index,Step Index,Boom 1000 Index,Crash 1000 Index,Jump 50 Index,Jump 75 Index,Jump 100 Index').split(',') if s.strip()]
+    
+    # Pending Order Monitoring
+    ENABLE_PENDING_ORDER_ALERTS = os.getenv('ENABLE_PENDING_ORDER_ALERTS', 'true').lower() == 'true'
+    PENDING_ORDER_PROXIMITY_PCT = float(os.getenv('PENDING_ORDER_PROXIMITY_PCT', '1.0'))  # Alert when price is within X% of pending order
     
     # Profit-taking Settings
     ENABLE_PROFIT_SUGGESTIONS = os.getenv('ENABLE_PROFIT_SUGGESTIONS', 'true').lower() == 'true'
