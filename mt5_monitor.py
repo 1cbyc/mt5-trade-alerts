@@ -276,13 +276,80 @@ class MT5Monitor:
             for pos in positions:
                 instruments.add(pos.symbol)
         
-        # Get instruments from orders
+        # Get instruments from orders (including pending limits)
         orders = mt5.orders_get()
         if orders:
             for order in orders:
                 instruments.add(order.symbol)
         
         return instruments
+    
+    def get_pending_orders_by_symbol(self) -> Dict[str, List[Dict]]:
+        """Get all pending orders grouped by symbol"""
+        if not self.connected:
+            return {}
+        
+        orders_by_symbol = {}
+        orders = mt5.orders_get()
+        
+        if orders:
+            for order in orders:
+                symbol = order.symbol
+                if symbol not in orders_by_symbol:
+                    orders_by_symbol[symbol] = []
+                
+                order_type_map = {
+                    mt5.ORDER_TYPE_BUY_LIMIT: 'BUY LIMIT',
+                    mt5.ORDER_TYPE_SELL_LIMIT: 'SELL LIMIT',
+                    mt5.ORDER_TYPE_BUY_STOP: 'BUY STOP',
+                    mt5.ORDER_TYPE_SELL_STOP: 'SELL STOP',
+                    mt5.ORDER_TYPE_BUY_STOP_LIMIT: 'BUY STOP LIMIT',
+                    mt5.ORDER_TYPE_SELL_STOP_LIMIT: 'SELL STOP LIMIT'
+                }
+                
+                orders_by_symbol[symbol].append({
+                    'ticket': order.ticket,
+                    'type': order_type_map.get(order.type, 'UNKNOWN'),
+                    'volume': order.volume_initial,
+                    'price_open': order.price_open,
+                    'price_current': order.price_current,
+                    'time_setup': datetime.fromtimestamp(order.time_setup).strftime('%Y-%m-%d %H:%M:%S'),
+                    'time_expiration': datetime.fromtimestamp(order.time_expiration).strftime('%Y-%m-%d %H:%M:%S') if order.time_expiration > 0 else None
+                })
+        
+        return orders_by_symbol
+    
+    def check_pending_order_proximity(self, symbol: str, threshold_pct: float = 1.0) -> List[Dict]:
+        """Check if current price is close to any pending order prices for a symbol"""
+        if not self.connected:
+            return []
+        
+        price_info = self.get_symbol_price(symbol)
+        if not price_info:
+            return []
+        
+        current_price = (price_info['bid'] + price_info['ask']) / 2
+        pending_orders = self.get_pending_orders_by_symbol().get(symbol, [])
+        
+        alerts = []
+        for order in pending_orders:
+            order_price = order['price_open']
+            price_diff = abs(current_price - order_price)
+            price_diff_pct = (price_diff / current_price * 100) if current_price > 0 else 0
+            
+            if price_diff_pct <= threshold_pct:
+                alerts.append({
+                    'symbol': symbol,
+                    'ticket': order['ticket'],
+                    'order_type': order['type'],
+                    'order_price': order_price,
+                    'current_price': current_price,
+                    'distance_pct': round(price_diff_pct, 2),
+                    'volume': order['volume'],
+                    'time': price_info['time']
+                })
+        
+        return alerts
     
     def analyze_profitable_positions(self, min_profit: float = 10.0, profit_percentage: float = 5.0) -> List[Dict]:
         """Analyze positions and suggest partial closes for profitable trades"""
