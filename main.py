@@ -122,6 +122,32 @@ class MT5AlertService:
         if new_symbols:
             logger.info(f"New instruments detected: {', '.join(new_symbols)}")
             self.monitored_symbols.update(new_symbols)
+        
+        # Log pending orders summary
+        pending_by_symbol = self.mt5_monitor.get_pending_orders_by_symbol()
+        if pending_by_symbol:
+            total_pending = sum(len(orders) for orders in pending_by_symbol.values())
+            logger.info(f"Tracking {total_pending} pending orders across {len(pending_by_symbol)} instruments")
+    
+    async def check_pending_order_proximity(self):
+        """Check if prices are approaching pending order levels"""
+        if not Config.ENABLE_PENDING_ORDER_ALERTS:
+            return
+        
+        pending_by_symbol = self.mt5_monitor.get_pending_orders_by_symbol()
+        
+        for symbol in pending_by_symbol.keys():
+            alerts = self.mt5_monitor.check_pending_order_proximity(
+                symbol, 
+                threshold_pct=Config.PENDING_ORDER_PROXIMITY_PCT
+            )
+            
+            for alert in alerts:
+                alert_key = f"pending_{alert['ticket']}"
+                if alert_key not in self.triggered_levels:
+                    logger.info(f"Price approaching pending order: {symbol} - {alert['order_type']} at {alert['order_price']} (current: {alert['current_price']}, {alert['distance_pct']}% away)")
+                    await self.telegram.send_pending_order_alert(alert)
+                    self.triggered_levels.add(alert_key)
     
     async def check_profit_suggestions(self):
         """Check for profitable positions and suggest partial closes"""
@@ -167,6 +193,10 @@ class MT5AlertService:
                 
                 # Check price levels for all monitored symbols
                 await self.check_price_levels()
+                
+                # Check pending order proximity (every 2 cycles = ~10 seconds)
+                if check_counter % 2 == 0:
+                    await self.check_pending_order_proximity()
                 
                 # Check profit suggestions (every 3 cycles = ~15 seconds)
                 if check_counter % 3 == 0:
