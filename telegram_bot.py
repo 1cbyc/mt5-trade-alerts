@@ -163,6 +163,37 @@ class TelegramNotifier:
         message = self.format_profit_suggestion(suggestion)
         return await self.send_message(message)
     
+    def format_pending_order_alert(self, alert: dict) -> str:
+        """Format pending order proximity alert for Telegram"""
+        symbol = alert.get('symbol', 'N/A')
+        ticket = alert.get('ticket', 'N/A')
+        order_type = alert.get('order_type', 'N/A')
+        order_price = alert.get('order_price', 0)
+        current_price = alert.get('current_price', 0)
+        distance_pct = alert.get('distance_pct', 0)
+        volume = alert.get('volume', 0)
+        time = alert.get('time', 'N/A')
+        
+        emoji = "⚠️"
+        
+        message = f"{emoji} <b>Pending Order Alert</b>\n\n"
+        message += f"Symbol: {symbol}\n"
+        message += f"Order Ticket: {ticket}\n"
+        message += f"Order Type: {order_type}\n"
+        message += f"Order Price: {order_price}\n"
+        message += f"Current Price: {current_price}\n"
+        message += f"Distance: {distance_pct}%\n"
+        message += f"Volume: {volume}\n"
+        message += f"\n⚠️ Price is approaching your pending order!"
+        message += f"\nTime: {time}"
+        
+        return message
+    
+    async def send_pending_order_alert(self, alert: dict) -> bool:
+        """Send pending order proximity alert to Telegram"""
+        message = self.format_pending_order_alert(alert)
+        return await self.send_message(message)
+    
     async def send_test_message(self) -> bool:
         """Send a test message to verify connection"""
         message = "🤖 <b>MT5 Trade Alerts Bot</b>\n\nBot is connected and ready!"
