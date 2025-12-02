@@ -4,11 +4,18 @@ Get real-time Telegram alerts for your MetaTrader 5 trades, orders, and price le
 
 ## Features
 
-- 🔔 **Trade Alerts**: Get notified when positions are opened or closed
-- 📋 **Order Alerts**: Monitor buy limits, sell limits, stop orders, and more
-- 🎯 **Price Level Alerts**: Set custom price levels and get alerts when they're reached
-- 💰 **Profit Tracking**: See profit/loss information in real-time
-- ⚡ **Real-time Monitoring**: Continuous monitoring with configurable intervals
+- **Trade Alerts**: Get notified when positions are opened or closed
+- **Order Alerts**: Monitor buy limits, sell limits, stop orders, and more
+- **Price Level Alerts**: Set custom price levels and get alerts when they're reached
+- **Profit Tracking**: See profit/loss information in real-time
+- **Real-time Monitoring**: Continuous monitoring with configurable intervals
+
+## How it works
+1. Monitors Volatility 25 Index and Step Index for price movements
+2. Tracks all your active trades and orders automatically
+3. Sends alerts when trades open and close
+4. Sends alerts when orders are placed or executed
+5. Suggests partial profit-taking when positions are profitable
 
 ## Prerequisites
 
