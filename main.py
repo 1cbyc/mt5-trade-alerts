@@ -313,10 +313,10 @@ class MT5AlertService:
                     for group_alert in group_alerts:
                         group_key = f"{symbol}_group_{group_alert['group_id']}"
                         if group_key not in self.triggered_levels:
-                    logger.info(f"Price level group triggered: {symbol} - {group_alert['group_id']}")
-                    message = self.telegram.format_level_group_alert(group_alert)
-                    await self._send_alert_safe(message, alert_type='price_level', priority='important')
-                    self.triggered_levels.add(group_key)
+                            logger.info(f"Price level group triggered: {symbol} - {group_alert['group_id']}")
+                            message = self.telegram.format_level_group_alert(group_alert)
+                            await self._send_alert_safe(message, alert_type='price_level', priority='important')
+                            self.triggered_levels.add(group_key)
     
     async def update_monitored_symbols(self):
         """Update list of symbols to monitor based on active positions/orders"""

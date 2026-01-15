@@ -83,8 +83,17 @@ class MT5Monitor:
             True if reconnection successful, False otherwise
         """
         logger.info("Attempting to reconnect to MT5...")
+        # Always call disconnect to ensure clean MT5 library state
+        # Even if self.connected is False, we need to ensure mt5.shutdown() is called
+        # in case the connection was lost but cleanup wasn't performed
         if self.connected:
             self.disconnect()
+        else:
+            # Connection was lost but disconnect() wasn't called, ensure cleanup
+            try:
+                mt5.shutdown()
+            except:
+                pass  # Ignore errors if already shut down
         
         return self.connect()
     
@@ -1220,6 +1229,12 @@ class MT5Monitor:
         # Send order
         result = mt5.order_send(request)
         
+        if result is None:
+            return {
+                'success': False,
+                'error': f'Failed to close position: order_send returned None (last_error={mt5.last_error()})'
+            }
+        
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             return {
                 'success': False,
@@ -1367,6 +1382,12 @@ class MT5Monitor:
         # Send order
         result = mt5.order_send(request)
         
+        if result is None:
+            return {
+                'success': False,
+                'error': f'Failed to modify position: order_send returned None (last_error={mt5.last_error()})'
+            }
+        
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             # Handle "No changes" error more gracefully
             if "no changes" in result.comment.lower() or result.retcode == 10004:
@@ -1412,18 +1433,30 @@ class MT5Monitor:
         
         pos = position[0]
         
-        if volume >= pos.volume:
-            return {
-                'success': False,
-                'error': f'Volume ({volume}) must be less than position volume ({pos.volume}). Use /close to close fully.'
-            }
-        
         # Get symbol info for volume step
         symbol_info = mt5.symbol_info(pos.symbol)
         if symbol_info:
-            volume_step = symbol_info.volume_step
+            volume_step = getattr(symbol_info, 'volume_step', None)
+            # Validate volume_step
+            if not volume_step or volume_step <= 0:
+                return {'success': False, 'error': f'Invalid volume_step for {pos.symbol}'}
             # Round volume to nearest step
             volume = round(volume / volume_step) * volume_step
+            # Re-validate after rounding
+            if volume <= 0:
+                return {'success': False, 'error': f'Volume too small (rounded to 0 based on volume step {volume_step})'}
+            if volume >= pos.volume:
+                return {
+                    'success': False,
+                    'error': f'Rounded volume ({volume}) must be less than position volume ({pos.volume}). Use /close to close fully.'
+                }
+        else:
+            # If no symbol_info, validate before proceeding
+            if volume >= pos.volume:
+                return {
+                    'success': False,
+                    'error': f'Volume ({volume}) must be less than position volume ({pos.volume}). Use /close to close fully.'
+                }
         
         # Get current price
         tick = mt5.symbol_info_tick(pos.symbol)
@@ -1455,6 +1488,12 @@ class MT5Monitor:
         
         # Send order
         result = mt5.order_send(request)
+        
+        if result is None:
+            return {
+                'success': False,
+                'error': f'Failed to partially close position: order_send returned None (last_error={mt5.last_error()})'
+            }
         
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             return {
