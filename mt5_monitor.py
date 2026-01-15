@@ -177,17 +177,91 @@ class MT5Monitor:
         
         for ticket in closed_tickets:
             closed_pos = self.tracked_positions.pop(ticket)
-            new_positions.append({
+            
+            # Get detailed trade information from deal history
+            trade_details = self._get_trade_details_from_deals(ticket)
+            
+            position_data = {
                 'ticket': closed_pos['ticket'],
                 'symbol': closed_pos['symbol'],
                 'type': 'CLOSED',
                 'volume': closed_pos['volume'],
                 'price_open': closed_pos['price_open'],
                 'profit': closed_pos['profit'],
-                'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            })
+                'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'time_open': closed_pos.get('time'),
+                'time_close': datetime.now().isoformat(),
+                'price_close': trade_details.get('price_close'),
+                'commission': trade_details.get('commission', 0),
+                'swap': trade_details.get('swap', 0),
+                'sl': trade_details.get('sl'),
+                'tp': trade_details.get('tp'),
+                'duration_seconds': trade_details.get('duration_seconds')
+            }
+            
+            new_positions.append(position_data)
         
         return new_positions
+    
+    def _get_trade_details_from_deals(self, position_ticket: int) -> Dict:
+        """Get detailed trade information from deal history"""
+        if not self.connected:
+            return {}
+        
+        try:
+            # Get deals for this position (last 24 hours should be enough)
+            from datetime import timedelta
+            end_time = datetime.now()
+            start_time = end_time - timedelta(days=1)
+            start_timestamp = int(start_time.timestamp())
+            end_timestamp = int(end_time.timestamp())
+            
+            deals = mt5.history_deals_get(start_timestamp, end_timestamp)
+            if not deals:
+                return {}
+            
+            # Find entry and exit deals
+            entry_deal = None
+            exit_deal = None
+            total_commission = 0.0
+            total_swap = 0.0
+            sl = None
+            tp = None
+            
+            for deal in deals:
+                if deal.position_id == position_ticket:
+                    if deal.entry == mt5.DEAL_ENTRY_IN:
+                        entry_deal = deal
+                        sl = deal.sl if deal.sl > 0 else None
+                        tp = deal.tp if deal.tp > 0 else None
+                    elif deal.entry == mt5.DEAL_ENTRY_OUT:
+                        exit_deal = deal
+                    
+                    total_commission += deal.commission
+                    total_swap += deal.swap
+            
+            result = {
+                'commission': total_commission,
+                'swap': total_swap,
+                'sl': sl,
+                'tp': tp
+            }
+            
+            if entry_deal and exit_deal:
+                result['price_close'] = exit_deal.price
+                entry_time = datetime.fromtimestamp(entry_deal.time)
+                exit_time = datetime.fromtimestamp(exit_deal.time)
+                result['duration_seconds'] = int((exit_time - entry_time).total_seconds())
+                result['time_open'] = entry_time.isoformat()
+                result['time_close'] = exit_time.isoformat()
+            elif exit_deal:
+                result['price_close'] = exit_deal.price
+                result['time_close'] = datetime.fromtimestamp(exit_deal.time).isoformat()
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error getting trade details from deals: {e}")
+            return {}
     
     def get_new_orders(self) -> List[Dict]:
         """Get newly placed or modified orders since last check"""

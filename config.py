@@ -81,6 +81,11 @@ class Config:
     QUIET_HOURS_END_HOUR = int(os.getenv('QUIET_HOURS_END_HOUR', '8'))  # End hour (24-hour format)
     QUIET_HOURS_END_MINUTE = int(os.getenv('QUIET_HOURS_END_MINUTE', '0'))  # End minute
     
+    # Trade History & Analytics
+    ENABLE_TRADE_HISTORY = os.getenv('ENABLE_TRADE_HISTORY', 'true').lower() == 'true'
+    TRADE_HISTORY_DB_PATH = os.getenv('TRADE_HISTORY_DB_PATH', 'trade_history.db')  # SQLite database path
+    ENABLE_CHARTS = os.getenv('ENABLE_CHARTS', 'true').lower() == 'true'
+    
     @staticmethod
     def load_price_levels() -> Dict[str, List[Dict]]:
         """Load price level configurations from JSON file"""
