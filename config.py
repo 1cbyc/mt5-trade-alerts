@@ -46,6 +46,11 @@ class Config:
     DAILY_LOSS_LIMIT_AMOUNT = float(os.getenv('DAILY_LOSS_LIMIT_AMOUNT', '0.0'))  # Alert when daily loss exceeds X amount (0 = disabled)
     DRAWDOWN_LIMIT_PCT = float(os.getenv('DRAWDOWN_LIMIT_PCT', '10.0'))  # Alert when drawdown exceeds X% from starting balance
     
+    # Daily Summary Settings
+    ENABLE_DAILY_SUMMARY = os.getenv('ENABLE_DAILY_SUMMARY', 'true').lower() == 'true'
+    DAILY_SUMMARY_HOUR = int(os.getenv('DAILY_SUMMARY_HOUR', '23'))  # Hour to send daily summary (24-hour format, default 23:00)
+    DAILY_SUMMARY_MINUTE = int(os.getenv('DAILY_SUMMARY_MINUTE', '0'))  # Minute to send daily summary (default 0)
+    
     @staticmethod
     def load_price_levels() -> Dict[str, List[Dict]]:
         """Load price level configurations from JSON file"""
