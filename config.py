@@ -41,6 +41,7 @@ class Config:
     ENABLE_RISK_ALERTS = os.getenv('ENABLE_RISK_ALERTS', 'true').lower() == 'true'
     MARGIN_LEVEL_WARNING = float(os.getenv('MARGIN_LEVEL_WARNING', '150.0'))  # Alert when margin level drops below X%
     MARGIN_LEVEL_CRITICAL = float(os.getenv('MARGIN_LEVEL_CRITICAL', '100.0'))  # Critical alert when margin level drops below X%
+    MARGIN_ALERT_MIN_BALANCE = float(os.getenv('MARGIN_ALERT_MIN_BALANCE', '25.0'))  # Only alert if balance is below this amount (prevents false alerts)
     MAX_POSITION_SIZE_PCT = float(os.getenv('MAX_POSITION_SIZE_PCT', '20.0'))  # Alert when position size exceeds X% of account
     DAILY_LOSS_LIMIT_PCT = float(os.getenv('DAILY_LOSS_LIMIT_PCT', '5.0'))  # Alert when daily loss exceeds X% of balance
     DAILY_LOSS_LIMIT_AMOUNT = float(os.getenv('DAILY_LOSS_LIMIT_AMOUNT', '0.0'))  # Alert when daily loss exceeds X amount (0 = disabled)

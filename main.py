@@ -571,7 +571,8 @@ class MT5AlertService:
         # Check margin level
         margin_alert = self.mt5_monitor.check_margin_level(
             warning_threshold=Config.MARGIN_LEVEL_WARNING,
-            critical_threshold=Config.MARGIN_LEVEL_CRITICAL
+            critical_threshold=Config.MARGIN_LEVEL_CRITICAL,
+            min_balance_threshold=Config.MARGIN_ALERT_MIN_BALANCE
         )
         if margin_alert:
             alert_key = f"margin_{margin_alert['type']}_{margin_alert['margin_level']:.1f}"
