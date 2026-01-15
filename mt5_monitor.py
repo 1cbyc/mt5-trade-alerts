@@ -435,12 +435,12 @@ class MT5Monitor:
                 'price_open': pos.price_open,
                 'price_current': pos.price_current,
                 'profit': pos.profit,
-                'swap': pos.swap,
-                'commission': pos.commission,
+                'swap': getattr(pos, 'swap', 0.0),
+                'commission': getattr(pos, 'commission', 0.0),
                 'time': datetime.fromtimestamp(pos.time).strftime('%Y-%m-%d %H:%M:%S'),
                 'time_update': datetime.fromtimestamp(pos.time_update).strftime('%Y-%m-%d %H:%M:%S'),
-                'sl': pos.sl,
-                'tp': pos.tp
+                'sl': pos.sl if pos.sl > 0 else None,
+                'tp': pos.tp if pos.tp > 0 else None
             })
         
         return result
