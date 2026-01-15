@@ -270,8 +270,8 @@ class MT5AlertService:
                 if check_counter % 3 == 0:
                     await self.check_profit_suggestions()
                 
-                # Check risk management alerts (every 5 cycles = ~25 seconds)
-                if check_counter % 5 == 0:
+                # Check risk management alerts (every 10 cycles = ~50 seconds - less frequent due to heavy operations)
+                if check_counter % 10 == 0:
                     await self.check_risk_alerts()
                 
                 # Wait before next check

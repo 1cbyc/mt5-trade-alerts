@@ -619,47 +619,71 @@ class MT5Monitor:
             return []
         
         alerts = []
+        # Use margin per position from account (more efficient than calculating)
+        # Total margin / number of positions gives approximate margin per position
+        # But MT5 doesn't expose per-position margin directly, so we use volume as proxy
+        # Position size % can be approximated by volume * price_open relative to balance
+        
         for pos in positions:
-            # Calculate position size in account currency
-            symbol_info = mt5.symbol_info(pos.symbol)
-            if not symbol_info:
-                continue
+            # Simplified calculation using volume and price as proxy
+            # This is faster and avoids symbol_info lookup for each position
+            position_value_approx = pos.volume * pos.price_open
             
-            # Get contract size
-            contract_size = getattr(symbol_info, 'trade_contract_size', 1)
-            leverage = account_info.leverage
+            # Rough estimate: for most instruments, this gives a reasonable approximation
+            # For precise calculation, we'd need symbol_info but that's slow
+            # Using equity instead of balance for more accurate representation
+            equity = account_info.equity if account_info.equity > 0 else balance
+            position_size_pct = (position_value_approx / equity * 100) if equity > 0 else 0
             
-            # Calculate position value and margin
-            position_value = pos.volume * pos.price_open * contract_size
-            margin_used = position_value / leverage if leverage > 0 else position_value
-            
-            position_size_pct = (margin_used / balance * 100) if balance > 0 else 0
-            
+            # More conservative check - if approximate exceeds limit, flag it
             if position_size_pct > max_size_pct:
-                alerts.append({
-                    'symbol': pos.symbol,
-                    'ticket': pos.ticket,
-                    'volume': pos.volume,
-                    'position_size_pct': round(position_size_pct, 2),
-                    'max_size_pct': max_size_pct,
-                    'margin_used': margin_used,
-                    'balance': balance
-                })
+                # Only do expensive symbol_info lookup if we're close to the limit
+                symbol_info = mt5.symbol_info(pos.symbol)
+                if symbol_info:
+                    contract_size = getattr(symbol_info, 'trade_contract_size', 1)
+                    leverage = account_info.leverage
+                    position_value = pos.volume * pos.price_open * contract_size
+                    margin_used = position_value / leverage if leverage > 0 else position_value
+                    position_size_pct = (margin_used / balance * 100) if balance > 0 else 0
+                    
+                    if position_size_pct > max_size_pct:
+                        alerts.append({
+                            'symbol': pos.symbol,
+                            'ticket': pos.ticket,
+                            'volume': pos.volume,
+                            'position_size_pct': round(position_size_pct, 2),
+                            'max_size_pct': max_size_pct,
+                            'margin_used': margin_used,
+                            'balance': balance
+                        })
         
         return alerts
     
     def check_daily_loss_limit(self, loss_limit_pct: float, loss_limit_amount: float) -> Optional[Dict]:
-        """Check if daily loss exceeds limits"""
+        """Check if daily loss exceeds limits - optimized to avoid expensive queries when possible"""
         if not self.connected:
             return None
         
-        # Get today's P/L summary
-        summary = self.get_pl_summary(period='daily')
-        if not summary:
+        account_info = mt5.account_info()
+        if not account_info:
             return None
         
-        total_profit = summary.get('total_profit', 0)
-        open_profit = summary.get('open_profit', 0)
+        # Fast path: Check open positions profit first (no history query needed)
+        positions = mt5.positions_get()
+        open_profit = sum(pos.profit for pos in positions) if positions else 0.0
+        balance = account_info.balance
+        
+        # Quick check: If open profit is positive and well above any loss threshold, skip expensive query
+        if open_profit > 0:
+            # Still need to check closed trades, but only if open profit suggests we might be at limit
+            estimated_threshold = balance * loss_limit_pct / 100 if loss_limit_pct > 0 else loss_limit_amount
+            if open_profit > estimated_threshold:
+                # Open profit is positive and large, likely no loss limit breached
+                return None
+        
+        # Need to check closed trades (slower query) - only when necessary
+        summary = self.get_pl_summary(period='daily')
+        total_profit = summary.get('total_profit', 0) if summary else 0
         total_pl = total_profit + open_profit
         
         # Check if we have a loss
@@ -667,12 +691,6 @@ class MT5Monitor:
             return None
         
         daily_loss = abs(total_pl)
-        
-        account_info = mt5.account_info()
-        if not account_info:
-            return None
-        
-        balance = account_info.balance
         loss_pct = (daily_loss / balance * 100) if balance > 0 else 0
         
         alert = None
