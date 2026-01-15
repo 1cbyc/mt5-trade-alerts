@@ -57,6 +57,12 @@ class MT5AlertService:
             chat_id=Config.TELEGRAM_CHAT_ID
         )
         
+        # Set MT5 monitor reference for command handlers
+        self.telegram.set_mt5_monitor(self.mt5_monitor)
+        
+        # Setup command handlers
+        await self.telegram.setup_commands()
+        
         # Send test message
         if await self.telegram.send_test_message():
             logger.info("Telegram bot connected successfully")
@@ -217,6 +223,9 @@ class MT5AlertService:
         """Clean shutdown"""
         logger.info("Shutting down...")
         self.running = False
+        
+        if self.telegram:
+            await self.telegram.stop_commands()
         
         if self.mt5_monitor:
             self.mt5_monitor.disconnect()

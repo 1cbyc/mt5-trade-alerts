@@ -386,4 +386,184 @@ class MT5Monitor:
                     })
         
         return suggestions
+    
+    def get_account_info(self) -> Optional[Dict]:
+        """Get account information"""
+        if not self.connected:
+            return None
+        
+        account_info = mt5.account_info()
+        if not account_info:
+            return None
+        
+        positions = mt5.positions_get()
+        open_positions_count = len(positions) if positions else 0
+        
+        # Calculate total profit from open positions
+        total_profit = sum(pos.profit for pos in positions) if positions else 0.0
+        
+        return {
+            'login': account_info.login,
+            'balance': account_info.balance,
+            'equity': account_info.equity,
+            'margin': account_info.margin,
+            'free_margin': account_info.margin_free,
+            'margin_level': account_info.margin_level if account_info.margin > 0 else 0,
+            'profit': total_profit,
+            'open_positions': open_positions_count,
+            'currency': account_info.currency,
+            'server': account_info.server,
+            'leverage': account_info.leverage
+        }
+    
+    def get_all_positions(self) -> List[Dict]:
+        """Get all open positions with detailed information"""
+        if not self.connected:
+            return []
+        
+        positions = mt5.positions_get()
+        if not positions:
+            return []
+        
+        result = []
+        for pos in positions:
+            result.append({
+                'ticket': pos.ticket,
+                'symbol': pos.symbol,
+                'type': 'BUY' if pos.type == mt5.ORDER_TYPE_BUY else 'SELL',
+                'volume': pos.volume,
+                'price_open': pos.price_open,
+                'price_current': pos.price_current,
+                'profit': pos.profit,
+                'swap': pos.swap,
+                'commission': pos.commission,
+                'time': datetime.fromtimestamp(pos.time).strftime('%Y-%m-%d %H:%M:%S'),
+                'time_update': datetime.fromtimestamp(pos.time_update).strftime('%Y-%m-%d %H:%M:%S'),
+                'sl': pos.sl,
+                'tp': pos.tp
+            })
+        
+        return result
+    
+    def get_all_orders(self) -> List[Dict]:
+        """Get all pending orders"""
+        if not self.connected:
+            return []
+        
+        orders = mt5.orders_get()
+        if not orders:
+            return []
+        
+        order_type_map = {
+            mt5.ORDER_TYPE_BUY_LIMIT: 'BUY LIMIT',
+            mt5.ORDER_TYPE_SELL_LIMIT: 'SELL LIMIT',
+            mt5.ORDER_TYPE_BUY_STOP: 'BUY STOP',
+            mt5.ORDER_TYPE_SELL_STOP: 'SELL STOP',
+            mt5.ORDER_TYPE_BUY_STOP_LIMIT: 'BUY STOP LIMIT',
+            mt5.ORDER_TYPE_SELL_STOP_LIMIT: 'SELL STOP LIMIT'
+        }
+        
+        result = []
+        for order in orders:
+            result.append({
+                'ticket': order.ticket,
+                'symbol': order.symbol,
+                'type': order_type_map.get(order.type, 'UNKNOWN'),
+                'volume': order.volume_initial,
+                'volume_current': order.volume_current,
+                'price_open': order.price_open,
+                'price_current': order.price_current,
+                'sl': order.sl,
+                'tp': order.tp,
+                'time_setup': datetime.fromtimestamp(order.time_setup).strftime('%Y-%m-%d %H:%M:%S'),
+                'time_expiration': datetime.fromtimestamp(order.time_expiration).strftime('%Y-%m-%d %H:%M:%S') if order.time_expiration > 0 else None
+            })
+        
+        return result
+    
+    def get_pl_summary(self, period: str = 'daily') -> Dict:
+        """Get profit/loss summary for a period (daily, weekly, monthly)"""
+        if not self.connected:
+            return {}
+        
+        from datetime import timedelta
+        import time
+        
+        now = datetime.now()
+        
+        if period == 'daily':
+            start_time = datetime(now.year, now.month, now.day)
+        elif period == 'weekly':
+            # Start of week (Monday)
+            days_since_monday = now.weekday()
+            start_time = datetime(now.year, now.month, now.day) - timedelta(days=days_since_monday)
+        elif period == 'monthly':
+            start_time = datetime(now.year, now.month, 1)
+        else:
+            start_time = datetime(now.year, now.month, now.day)
+        
+        start_timestamp = int(start_time.timestamp())
+        end_timestamp = int(datetime.now().timestamp())
+        
+        # Get deal history (returns tuple or None)
+        deals = mt5.history_deals_get(start_timestamp, end_timestamp)
+        
+        if deals is None or len(deals) == 0:
+            return {
+                'period': period,
+                'total_profit': 0.0,
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'largest_win': 0.0,
+                'largest_loss': 0.0,
+                'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+        
+        total_profit = 0.0
+        trades = {}
+        winning_trades = 0
+        losing_trades = 0
+        largest_win = 0.0
+        largest_loss = 0.0
+        
+        # Group deals by position ticket
+        for deal in deals:
+            if deal.entry == mt5.DEAL_ENTRY_OUT:  # Only count exit deals
+                ticket = deal.position_id
+                profit = deal.profit
+                
+                if ticket not in trades:
+                    trades[ticket] = 0.0
+                
+                trades[ticket] += profit
+                total_profit += profit
+        
+        # Analyze trades
+        for ticket, profit in trades.items():
+            if profit > 0:
+                winning_trades += 1
+                if profit > largest_win:
+                    largest_win = profit
+            elif profit < 0:
+                losing_trades += 1
+                if profit < largest_loss:
+                    largest_loss = profit
+        
+        # Get current open positions profit
+        positions = mt5.positions_get()
+        open_profit = sum(pos.profit for pos in positions) if positions else 0.0
+        
+        return {
+            'period': period,
+            'total_profit': total_profit,
+            'open_profit': open_profit,
+            'total_trades': len(trades),
+            'winning_trades': winning_trades,
+            'losing_trades': losing_trades,
+            'win_rate': (winning_trades / len(trades) * 100) if trades else 0.0,
+            'largest_win': largest_win,
+            'largest_loss': largest_loss,
+            'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S')
+        }
 
