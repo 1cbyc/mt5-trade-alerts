@@ -517,6 +517,8 @@ class MT5Monitor:
                 'losing_trades': 0,
                 'largest_win': 0.0,
                 'largest_loss': 0.0,
+                'best_trade': None,
+                'worst_trade': None,
                 'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S')
             }
         
@@ -526,29 +528,81 @@ class MT5Monitor:
         losing_trades = 0
         largest_win = 0.0
         largest_loss = 0.0
+        best_trade = None
+        worst_trade = None
         
-        # Group deals by position ticket
+        # Group deals by position ticket and collect detailed info
         for deal in deals:
-            if deal.entry == mt5.DEAL_ENTRY_OUT:  # Only count exit deals
-                ticket = deal.position_id
-                profit = deal.profit
-                
-                if ticket not in trades:
-                    trades[ticket] = 0.0
-                
-                trades[ticket] += profit
-                total_profit += profit
+            ticket = deal.position_id
+            if ticket not in trades:
+                trades[ticket] = {
+                    'profit': 0.0,
+                    'symbol': deal.symbol,
+                    'volume': 0.0,
+                    'entry_time': None,
+                    'exit_time': None,
+                    'entry_price': None,
+                    'exit_price': None,
+                    'commission': 0.0,
+                    'swap': 0.0,
+                    'type': None
+                }
+            
+            if deal.entry == mt5.DEAL_ENTRY_IN:
+                # Entry deal
+                trades[ticket]['entry_time'] = datetime.fromtimestamp(deal.time)
+                trades[ticket]['entry_price'] = deal.price
+                trades[ticket]['volume'] = deal.volume
+                trades[ticket]['type'] = 'BUY' if deal.type == mt5.DEAL_TYPE_BUY else 'SELL'
+            elif deal.entry == mt5.DEAL_ENTRY_OUT:
+                # Exit deal
+                trades[ticket]['exit_time'] = datetime.fromtimestamp(deal.time)
+                trades[ticket]['exit_price'] = deal.price
+                trades[ticket]['profit'] += deal.profit
+                trades[ticket]['commission'] += deal.commission
+                trades[ticket]['swap'] += deal.swap
+                total_profit += deal.profit
         
-        # Analyze trades
-        for ticket, profit in trades.items():
+        # Analyze trades and find best/worst
+        for ticket, trade_info in trades.items():
+            profit = trade_info['profit']
+            
             if profit > 0:
                 winning_trades += 1
                 if profit > largest_win:
                     largest_win = profit
+                    best_trade = {
+                        'ticket': ticket,
+                        'symbol': trade_info['symbol'],
+                        'type': trade_info['type'],
+                        'profit': profit,
+                        'volume': trade_info['volume'],
+                        'entry_price': trade_info['entry_price'],
+                        'exit_price': trade_info['exit_price'],
+                        'entry_time': trade_info['entry_time'].strftime('%Y-%m-%d %H:%M:%S') if trade_info['entry_time'] else None,
+                        'exit_time': trade_info['exit_time'].strftime('%Y-%m-%d %H:%M:%S') if trade_info['exit_time'] else None,
+                        'duration': str(trade_info['exit_time'] - trade_info['entry_time']) if trade_info['entry_time'] and trade_info['exit_time'] else None,
+                        'commission': trade_info['commission'],
+                        'swap': trade_info['swap']
+                    }
             elif profit < 0:
                 losing_trades += 1
                 if profit < largest_loss:
                     largest_loss = profit
+                    worst_trade = {
+                        'ticket': ticket,
+                        'symbol': trade_info['symbol'],
+                        'type': trade_info['type'],
+                        'profit': profit,
+                        'volume': trade_info['volume'],
+                        'entry_price': trade_info['entry_price'],
+                        'exit_price': trade_info['exit_price'],
+                        'entry_time': trade_info['entry_time'].strftime('%Y-%m-%d %H:%M:%S') if trade_info['entry_time'] else None,
+                        'exit_time': trade_info['exit_time'].strftime('%Y-%m-%d %H:%M:%S') if trade_info['exit_time'] else None,
+                        'duration': str(trade_info['exit_time'] - trade_info['entry_time']) if trade_info['entry_time'] and trade_info['exit_time'] else None,
+                        'commission': trade_info['commission'],
+                        'swap': trade_info['swap']
+                    }
         
         # Get current open positions profit
         positions = mt5.positions_get()
@@ -564,6 +618,178 @@ class MT5Monitor:
             'win_rate': (winning_trades / len(trades) * 100) if trades else 0.0,
             'largest_win': largest_win,
             'largest_loss': largest_loss,
+            'best_trade': best_trade,
+            'worst_trade': worst_trade,
+            'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S')
+        }
+    
+    def get_trade_statistics(self, period: str = 'daily') -> Dict:
+        """Get comprehensive trade statistics for a period"""
+        if not self.connected:
+            return {}
+        
+        from datetime import timedelta
+        
+        now = datetime.now()
+        
+        if period == 'daily':
+            start_time = datetime(now.year, now.month, now.day)
+        elif period == 'weekly':
+            days_since_monday = now.weekday()
+            start_time = datetime(now.year, now.month, now.day) - timedelta(days=days_since_monday)
+        elif period == 'monthly':
+            start_time = datetime(now.year, now.month, 1)
+        else:
+            start_time = datetime(now.year, now.month, now.day)
+        
+        start_timestamp = int(start_time.timestamp())
+        end_timestamp = int(datetime.now().timestamp())
+        
+        deals = mt5.history_deals_get(start_timestamp, end_timestamp)
+        
+        if deals is None or len(deals) == 0:
+            return {
+                'period': period,
+                'total_profit': 0.0,
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'break_even_trades': 0,
+                'win_rate': 0.0,
+                'average_win': 0.0,
+                'average_loss': 0.0,
+                'profit_factor': 0.0,
+                'best_trade': None,
+                'worst_trade': None,
+                'total_volume': 0.0,
+                'total_commission': 0.0,
+                'total_swap': 0.0,
+                'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+        
+        trades = {}
+        total_profit = 0.0
+        total_commission = 0.0
+        total_swap = 0.0
+        total_volume = 0.0
+        winning_profit = 0.0
+        losing_profit = 0.0
+        
+        # Process deals
+        for deal in deals:
+            ticket = deal.position_id
+            if ticket not in trades:
+                trades[ticket] = {
+                    'profit': 0.0,
+                    'symbol': deal.symbol,
+                    'volume': 0.0,
+                    'entry_time': None,
+                    'exit_time': None,
+                    'entry_price': None,
+                    'exit_price': None,
+                    'commission': 0.0,
+                    'swap': 0.0,
+                    'type': None
+                }
+            
+            if deal.entry == mt5.DEAL_ENTRY_IN:
+                trades[ticket]['entry_time'] = datetime.fromtimestamp(deal.time)
+                trades[ticket]['entry_price'] = deal.price
+                trades[ticket]['volume'] = deal.volume
+                trades[ticket]['type'] = 'BUY' if deal.type == mt5.DEAL_TYPE_BUY else 'SELL'
+                total_volume += deal.volume
+            elif deal.entry == mt5.DEAL_ENTRY_OUT:
+                trades[ticket]['exit_time'] = datetime.fromtimestamp(deal.time)
+                trades[ticket]['exit_price'] = deal.price
+                trades[ticket]['profit'] += deal.profit
+                trades[ticket]['commission'] += deal.commission
+                trades[ticket]['swap'] += deal.swap
+                total_profit += deal.profit
+                total_commission += deal.commission
+                total_swap += deal.swap
+        
+        # Analyze trades
+        winning_trades = 0
+        losing_trades = 0
+        break_even_trades = 0
+        best_trade = None
+        worst_trade = None
+        wins = []
+        losses = []
+        
+        for ticket, trade_info in trades.items():
+            profit = trade_info['profit']
+            
+            if profit > 0:
+                winning_trades += 1
+                winning_profit += profit
+                wins.append(profit)
+                
+                if best_trade is None or profit > best_trade['profit']:
+                    best_trade = {
+                        'ticket': ticket,
+                        'symbol': trade_info['symbol'],
+                        'type': trade_info['type'],
+                        'profit': profit,
+                        'volume': trade_info['volume'],
+                        'entry_price': trade_info['entry_price'],
+                        'exit_price': trade_info['exit_price'],
+                        'entry_time': trade_info['entry_time'].strftime('%Y-%m-%d %H:%M:%S') if trade_info['entry_time'] else None,
+                        'exit_time': trade_info['exit_time'].strftime('%Y-%m-%d %H:%M:%S') if trade_info['exit_time'] else None,
+                        'duration': str(trade_info['exit_time'] - trade_info['entry_time']) if trade_info['entry_time'] and trade_info['exit_time'] else None,
+                        'commission': trade_info['commission'],
+                        'swap': trade_info['swap']
+                    }
+            elif profit < 0:
+                losing_trades += 1
+                losing_profit += abs(profit)
+                losses.append(profit)
+                
+                if worst_trade is None or profit < worst_trade['profit']:
+                    worst_trade = {
+                        'ticket': ticket,
+                        'symbol': trade_info['symbol'],
+                        'type': trade_info['type'],
+                        'profit': profit,
+                        'volume': trade_info['volume'],
+                        'entry_price': trade_info['entry_price'],
+                        'exit_price': trade_info['exit_price'],
+                        'entry_time': trade_info['entry_time'].strftime('%Y-%m-%d %H:%M:%S') if trade_info['entry_time'] else None,
+                        'exit_time': trade_info['exit_time'].strftime('%Y-%m-%d %H:%M:%S') if trade_info['exit_time'] else None,
+                        'duration': str(trade_info['exit_time'] - trade_info['entry_time']) if trade_info['entry_time'] and trade_info['exit_time'] else None,
+                        'commission': trade_info['commission'],
+                        'swap': trade_info['swap']
+                    }
+            else:
+                break_even_trades += 1
+        
+        # Calculate statistics
+        win_rate = (winning_trades / len(trades) * 100) if trades else 0.0
+        average_win = (winning_profit / winning_trades) if winning_trades > 0 else 0.0
+        average_loss = (losing_profit / losing_trades) if losing_trades > 0 else 0.0
+        profit_factor = (winning_profit / losing_profit) if losing_profit > 0 else (winning_profit if winning_profit > 0 else 0.0)
+        
+        # Get current open positions profit
+        positions = mt5.positions_get()
+        open_profit = sum(pos.profit for pos in positions) if positions else 0.0
+        
+        return {
+            'period': period,
+            'total_profit': total_profit,
+            'open_profit': open_profit,
+            'total_trades': len(trades),
+            'winning_trades': winning_trades,
+            'losing_trades': losing_trades,
+            'break_even_trades': break_even_trades,
+            'win_rate': win_rate,
+            'average_win': average_win,
+            'average_loss': average_loss,
+            'profit_factor': profit_factor,
+            'best_trade': best_trade,
+            'worst_trade': worst_trade,
+            'total_volume': total_volume,
+            'total_commission': total_commission,
+            'total_swap': total_swap,
             'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S')
         }
     
