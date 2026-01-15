@@ -566,4 +566,175 @@ class MT5Monitor:
             'largest_loss': largest_loss,
             'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S')
         }
+    
+    def check_margin_level(self, warning_threshold: float, critical_threshold: float) -> Optional[Dict]:
+        """Check margin level and return alert if below thresholds"""
+        if not self.connected:
+            return None
+        
+        account_info = mt5.account_info()
+        if not account_info:
+            return None
+        
+        margin_level = account_info.margin_level if account_info.margin > 0 else 0
+        
+        if margin_level <= critical_threshold:
+            return {
+                'type': 'critical',
+                'margin_level': margin_level,
+                'threshold': critical_threshold,
+                'balance': account_info.balance,
+                'equity': account_info.equity,
+                'margin': account_info.margin,
+                'free_margin': account_info.margin_free
+            }
+        elif margin_level <= warning_threshold:
+            return {
+                'type': 'warning',
+                'margin_level': margin_level,
+                'threshold': warning_threshold,
+                'balance': account_info.balance,
+                'equity': account_info.equity,
+                'margin': account_info.margin,
+                'free_margin': account_info.margin_free
+            }
+        
+        return None
+    
+    def check_position_sizes(self, max_size_pct: float) -> List[Dict]:
+        """Check if any positions exceed maximum size percentage of account"""
+        if not self.connected:
+            return []
+        
+        account_info = mt5.account_info()
+        if not account_info:
+            return []
+        
+        balance = account_info.balance
+        if balance <= 0:
+            return []
+        
+        positions = mt5.positions_get()
+        if not positions:
+            return []
+        
+        alerts = []
+        for pos in positions:
+            # Calculate position size in account currency
+            symbol_info = mt5.symbol_info(pos.symbol)
+            if not symbol_info:
+                continue
+            
+            # Get contract size
+            contract_size = getattr(symbol_info, 'trade_contract_size', 1)
+            leverage = account_info.leverage
+            
+            # Calculate position value and margin
+            position_value = pos.volume * pos.price_open * contract_size
+            margin_used = position_value / leverage if leverage > 0 else position_value
+            
+            position_size_pct = (margin_used / balance * 100) if balance > 0 else 0
+            
+            if position_size_pct > max_size_pct:
+                alerts.append({
+                    'symbol': pos.symbol,
+                    'ticket': pos.ticket,
+                    'volume': pos.volume,
+                    'position_size_pct': round(position_size_pct, 2),
+                    'max_size_pct': max_size_pct,
+                    'margin_used': margin_used,
+                    'balance': balance
+                })
+        
+        return alerts
+    
+    def check_daily_loss_limit(self, loss_limit_pct: float, loss_limit_amount: float) -> Optional[Dict]:
+        """Check if daily loss exceeds limits"""
+        if not self.connected:
+            return None
+        
+        # Get today's P/L summary
+        summary = self.get_pl_summary(period='daily')
+        if not summary:
+            return None
+        
+        total_profit = summary.get('total_profit', 0)
+        open_profit = summary.get('open_profit', 0)
+        total_pl = total_profit + open_profit
+        
+        # Check if we have a loss
+        if total_pl >= 0:
+            return None
+        
+        daily_loss = abs(total_pl)
+        
+        account_info = mt5.account_info()
+        if not account_info:
+            return None
+        
+        balance = account_info.balance
+        loss_pct = (daily_loss / balance * 100) if balance > 0 else 0
+        
+        alert = None
+        
+        # Check percentage limit
+        if loss_limit_pct > 0 and loss_pct >= loss_limit_pct:
+            alert = {
+                'type': 'daily_loss_pct',
+                'daily_loss': daily_loss,
+                'loss_pct': round(loss_pct, 2),
+                'limit_pct': loss_limit_pct,
+                'balance': balance,
+                'closed_profit': total_profit,
+                'open_profit': open_profit
+            }
+        
+        # Check amount limit (takes precedence if both are set)
+        if loss_limit_amount > 0 and daily_loss >= loss_limit_amount:
+            alert = {
+                'type': 'daily_loss_amount',
+                'daily_loss': daily_loss,
+                'loss_limit': loss_limit_amount,
+                'balance': balance,
+                'closed_profit': total_profit,
+                'open_profit': open_profit
+            }
+        
+        return alert
+    
+    def check_drawdown(self, drawdown_limit_pct: float, initial_balance: float = None) -> Optional[Dict]:
+        """Check if current drawdown exceeds limit from initial balance"""
+        if not self.connected:
+            return None
+        
+        account_info = mt5.account_info()
+        if not account_info:
+            return None
+        
+        current_balance = account_info.balance
+        equity = account_info.equity
+        
+        # Use provided initial balance or current balance if not provided
+        if initial_balance is None:
+            initial_balance = current_balance
+        
+        if initial_balance <= 0:
+            return None
+        
+        # Calculate drawdown from equity (worst case)
+        drawdown_amount = initial_balance - equity
+        drawdown_pct = (drawdown_amount / initial_balance * 100) if initial_balance > 0 else 0
+        
+        if drawdown_pct >= drawdown_limit_pct:
+            return {
+                'drawdown_pct': round(drawdown_pct, 2),
+                'drawdown_amount': drawdown_amount,
+                'limit_pct': drawdown_limit_pct,
+                'initial_balance': initial_balance,
+                'current_balance': current_balance,
+                'equity': equity,
+                'profit': equity - initial_balance
+            }
+        
+        return None
 
