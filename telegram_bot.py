@@ -107,18 +107,59 @@ class TelegramNotifier:
         level_type = alert.get('level_type', 'both')
         level_id = alert.get('level_id', 'unknown')
         time = alert.get('time', 'N/A')
+        recurring = alert.get('recurring', False)
+        description = alert.get('description', '')
+        group = alert.get('group')
         
         emoji = "🎯"
+        if recurring:
+            emoji = "🔄"
         
         message = f"{emoji} <b>Price Level Reached</b>\n\n"
         message += f"Symbol: {symbol}\n"
         message += f"Level ID: {level_id}\n"
+        if description:
+            message += f"Description: {description}\n"
         message += f"Target Price: {level_price}\n"
         message += f"Current Price: {current_price}\n"
         message += f"Direction: {level_type}\n"
+        if recurring:
+            message += f"Type: 🔄 Recurring Alert\n"
+        else:
+            message += f"Type: ⚡ One-time Alert\n"
+        if group:
+            message += f"Group: {group}\n"
         message += f"Time: {time}"
         
         return message
+    
+    def format_level_group_alert(self, alert: dict) -> str:
+        """Format price level group alert for Telegram"""
+        symbol = alert.get('symbol', 'N/A')
+        group_id = alert.get('group_id', 'unknown')
+        description = alert.get('description', '')
+        triggered_count = alert.get('triggered_count', 0)
+        required_count = alert.get('required_count', 2)
+        triggered_levels = alert.get('triggered_levels', [])
+        time = alert.get('time', 'N/A')
+        
+        emoji = "🎯🎯"
+        
+        message = f"{emoji} <b>Price Level Group Triggered</b>\n\n"
+        message += f"Symbol: {symbol}\n"
+        message += f"Group ID: {group_id}\n"
+        if description:
+            message += f"Description: {description}\n"
+        message += f"\n✅ Triggered Levels: {triggered_count}/{required_count}\n"
+        message += f"Levels: {', '.join(triggered_levels)}\n"
+        message += f"\nTime: {time}"
+        
+        return message
+    
+    async def send_level_group_alert(self, alert: dict) -> bool:
+        """Send price level group alert to Telegram"""
+        message = self.format_level_group_alert(alert)
+        return await self.send_message(message)
     
     async def send_trade_alert(self, trade: dict) -> bool:
         """Send trade alert to Telegram"""

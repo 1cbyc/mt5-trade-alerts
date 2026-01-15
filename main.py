@@ -31,6 +31,7 @@ class MT5AlertService:
         self.sent_risk_alerts = set()  # Track sent risk alerts to avoid spam
         self.initial_balance = None  # Track initial balance for drawdown calculation
         self.last_daily_summary_date = None  # Track last date daily summary was sent
+        self.last_dynamic_levels_update = None  # Track last dynamic levels update time
     
     async def initialize(self):
         """Initialize MT5 and Telegram connections"""
@@ -119,10 +120,30 @@ class MT5AlertService:
             triggered = self.mt5_monitor.check_price_levels(symbol, levels)
             for alert in triggered:
                 level_key = f"{symbol}_{alert['level_id']}"
-                if level_key not in self.triggered_levels:
-                    logger.info(f"Price level reached: {symbol} - {alert['level_id']} at {alert['current_price']}")
-                    await self.telegram.send_price_alert(alert)
+                is_recurring = alert.get('recurring', False)
+                
+                # For one-time alerts, check if already triggered
+                if not is_recurring and level_key in self.triggered_levels:
+                    continue
+                
+                logger.info(f"Price level reached: {symbol} - {alert['level_id']} at {alert['current_price']}")
+                await self.telegram.send_price_alert(alert)
+                
+                # Only add to triggered set if it's a one-time alert
+                if not is_recurring:
                     self.triggered_levels.add(level_key)
+            
+            # Check for level groups
+            if Config.ENABLE_PRICE_LEVEL_GROUPS:
+                triggered_ids = [alert['level_id'] for alert in triggered]
+                if triggered_ids:
+                    group_alerts = self.mt5_monitor.check_level_groups(symbol, levels, triggered_ids)
+                    for group_alert in group_alerts:
+                        group_key = f"{symbol}_group_{group_alert['group_id']}"
+                        if group_key not in self.triggered_levels:
+                            logger.info(f"Price level group triggered: {symbol} - {group_alert['group_id']}")
+                            await self.telegram.send_level_group_alert(group_alert)
+                            self.triggered_levels.add(group_key)
     
     async def update_monitored_symbols(self):
         """Update list of symbols to monitor based on active positions/orders"""
@@ -266,6 +287,88 @@ class MT5AlertService:
                 logger.info("No trades today, skipping daily summary")
                 self.last_daily_summary_date = current_date
     
+    async def update_dynamic_levels(self):
+        """Auto-detect and update dynamic support/resistance levels"""
+        if not Config.ENABLE_DYNAMIC_LEVELS:
+            return
+        
+        from datetime import timedelta
+        
+        now = datetime.now()
+        
+        # Check if it's time to update (based on configured interval)
+        if self.last_dynamic_levels_update:
+            hours_since_update = (now - self.last_dynamic_levels_update).total_seconds() / 3600
+            if hours_since_update < Config.DYNAMIC_LEVELS_AUTO_UPDATE_HOURS:
+                return
+        else:
+            # First run, update immediately
+            pass
+        
+        logger.info("Updating dynamic support/resistance levels...")
+        
+        # Get symbols to analyze (from monitored symbols or active instruments)
+        symbols_to_analyze = set(Config.MONITORED_SYMBOLS)
+        active_instruments = self.mt5_monitor.get_active_instruments()
+        symbols_to_analyze.update(active_instruments)
+        
+        updated_count = 0
+        for symbol in symbols_to_analyze:
+            try:
+                levels = self.mt5_monitor.detect_support_resistance(
+                    symbol=symbol,
+                    timeframe=Config.DYNAMIC_LEVELS_TIMEFRAME,
+                    periods=Config.DYNAMIC_LEVELS_PERIODS,
+                    min_touches=Config.DYNAMIC_LEVELS_MIN_TOUCHES,
+                    tolerance_pct=Config.DYNAMIC_LEVELS_TOLERANCE_PCT
+                )
+                
+                # Add detected levels to price_levels.json
+                if symbol not in self.price_levels:
+                    self.price_levels[symbol] = []
+                
+                # Remove old dynamic levels (those with id starting with "dynamic_")
+                self.price_levels[symbol] = [
+                    level for level in self.price_levels[symbol] 
+                    if not level.get('id', '').startswith('dynamic_')
+                ]
+                
+                # Add new support levels
+                for idx, support_price in enumerate(levels['support']):
+                    self.price_levels[symbol].append({
+                        'id': f'dynamic_support_{idx+1}',
+                        'price': support_price,
+                        'type': 'below',
+                        'description': f'Auto-detected support level #{idx+1}',
+                        'recurring': True,  # Dynamic levels are recurring
+                        'dynamic': True  # Mark as dynamic
+                    })
+                
+                # Add new resistance levels
+                for idx, resistance_price in enumerate(levels['resistance']):
+                    self.price_levels[symbol].append({
+                        'id': f'dynamic_resistance_{idx+1}',
+                        'price': resistance_price,
+                        'type': 'above',
+                        'description': f'Auto-detected resistance level #{idx+1}',
+                        'recurring': True,  # Dynamic levels are recurring
+                        'dynamic': True  # Mark as dynamic
+                    })
+                
+                if levels['support'] or levels['resistance']:
+                    updated_count += 1
+                    logger.info(f"Detected {len(levels['support'])} support and {len(levels['resistance'])} resistance levels for {symbol}")
+            
+            except Exception as e:
+                logger.error(f"Error detecting levels for {symbol}: {e}")
+        
+        if updated_count > 0:
+            # Save updated levels
+            Config.save_price_levels(self.price_levels)
+            logger.info(f"Updated dynamic levels for {updated_count} symbols")
+        
+        self.last_dynamic_levels_update = now
+    
     async def run(self):
         """Main event loop"""
         if not await self.initialize():
@@ -309,6 +412,10 @@ class MT5AlertService:
                 # Check daily summary (every 12 cycles = ~60 seconds - check once per minute)
                 if check_counter % 12 == 0:
                     await self.check_daily_summary()
+                
+                # Update dynamic levels (every 360 cycles = ~30 minutes)
+                if Config.ENABLE_DYNAMIC_LEVELS and check_counter % 360 == 0:
+                    await self.update_dynamic_levels()
                 
                 # Wait before next check
                 await asyncio.sleep(Config.PRICE_CHECK_INTERVAL)
