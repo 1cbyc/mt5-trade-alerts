@@ -1126,4 +1126,287 @@ class MT5Monitor:
             }
         
         return None
+    
+    def close_position(self, ticket: int) -> Dict:
+        """
+        Close a specific position by ticket
+        
+        Args:
+            ticket: Position ticket number
+        
+        Returns:
+            Dictionary with success status and details
+        """
+        if not self.connected:
+            return {'success': False, 'error': 'Not connected to MT5'}
+        
+        # Get position information
+        position = mt5.positions_get(ticket=ticket)
+        if not position or len(position) == 0:
+            return {'success': False, 'error': f'Position with ticket {ticket} not found'}
+        
+        pos = position[0]
+        
+        # Prepare close request
+        symbol = pos.symbol
+        volume = pos.volume
+        position_type = pos.type
+        
+        # Get current price
+        tick = mt5.symbol_info_tick(symbol)
+        if not tick:
+            return {'success': False, 'error': f'Could not get current price for {symbol}'}
+        
+        # Determine close price based on position type
+        if position_type == mt5.ORDER_TYPE_BUY:
+            price = tick.bid  # Close buy position at bid
+            order_type = mt5.ORDER_TYPE_SELL
+        else:
+            price = tick.ask  # Close sell position at ask
+            order_type = mt5.ORDER_TYPE_BUY
+        
+        # Create close request
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": volume,
+            "type": order_type,
+            "position": ticket,
+            "price": price,
+            "deviation": 20,
+            "magic": 234000,
+            "comment": "Closed via Telegram",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        
+        # Send order
+        result = mt5.order_send(request)
+        
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            return {
+                'success': False,
+                'error': f'Failed to close position: {result.comment}',
+                'retcode': result.retcode
+            }
+        
+        return {
+            'success': True,
+            'ticket': ticket,
+            'symbol': symbol,
+            'volume': volume,
+            'price': price,
+            'profit': pos.profit,
+            'deal_ticket': result.order
+        }
+    
+    def close_all_positions(self) -> Dict:
+        """
+        Close all open positions
+        
+        Returns:
+            Dictionary with results summary
+        """
+        if not self.connected:
+            return {'success': False, 'error': 'Not connected to MT5'}
+        
+        positions = mt5.positions_get()
+        if not positions or len(positions) == 0:
+            return {
+                'success': True,
+                'closed_count': 0,
+                'total_profit': 0.0,
+                'message': 'No open positions to close'
+            }
+        
+        closed_count = 0
+        failed_count = 0
+        total_profit = 0.0
+        errors = []
+        
+        for pos in positions:
+            result = self.close_position(pos.ticket)
+            if result.get('success'):
+                closed_count += 1
+                total_profit += result.get('profit', 0)
+            else:
+                failed_count += 1
+                errors.append(f"Ticket {pos.ticket}: {result.get('error', 'Unknown error')}")
+        
+        return {
+            'success': closed_count > 0,
+            'closed_count': closed_count,
+            'failed_count': failed_count,
+            'total_positions': len(positions),
+            'total_profit': total_profit,
+            'errors': errors if errors else None
+        }
+    
+    def modify_position(self, ticket: int, sl: float = None, tp: float = None) -> Dict:
+        """
+        Modify stop loss and/or take profit for a position
+        
+        Args:
+            ticket: Position ticket number
+            sl: New stop loss price (None to keep current)
+            tp: New take profit price (None to keep current)
+        
+        Returns:
+            Dictionary with success status and details
+        """
+        if not self.connected:
+            return {'success': False, 'error': 'Not connected to MT5'}
+        
+        # Get position information
+        position = mt5.positions_get(ticket=ticket)
+        if not position or len(position) == 0:
+            return {'success': False, 'error': f'Position with ticket {ticket} not found'}
+        
+        pos = position[0]
+        
+        # Use current SL/TP if not provided
+        new_sl = sl if sl is not None else pos.sl
+        new_tp = tp if tp is not None else pos.tp
+        
+        # Validate prices
+        symbol_info = mt5.symbol_info(pos.symbol)
+        if not symbol_info:
+            return {'success': False, 'error': f'Could not get symbol info for {pos.symbol}'}
+        
+        point = symbol_info.point
+        current_price = pos.price_current
+        
+        # Check if SL/TP are valid (must be appropriate distance from current price)
+        if new_sl > 0:
+            if pos.type == mt5.ORDER_TYPE_BUY:
+                if new_sl >= current_price:
+                    return {'success': False, 'error': 'Stop loss must be below current price for BUY position'}
+            else:
+                if new_sl <= current_price:
+                    return {'success': False, 'error': 'Stop loss must be above current price for SELL position'}
+        
+        if new_tp > 0:
+            if pos.type == mt5.ORDER_TYPE_BUY:
+                if new_tp <= current_price:
+                    return {'success': False, 'error': 'Take profit must be above current price for BUY position'}
+            else:
+                if new_tp >= current_price:
+                    return {'success': False, 'error': 'Take profit must be below current price for SELL position'}
+        
+        # Create modify request
+        request = {
+            "action": mt5.TRADE_ACTION_SLTP,
+            "symbol": pos.symbol,
+            "position": ticket,
+            "sl": new_sl if new_sl > 0 else 0.0,
+            "tp": new_tp if new_tp > 0 else 0.0,
+        }
+        
+        # Send order
+        result = mt5.order_send(request)
+        
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            return {
+                'success': False,
+                'error': f'Failed to modify position: {result.comment}',
+                'retcode': result.retcode
+            }
+        
+        return {
+            'success': True,
+            'ticket': ticket,
+            'symbol': pos.symbol,
+            'sl': new_sl if new_sl > 0 else None,
+            'tp': new_tp if new_tp > 0 else None
+        }
+    
+    def partial_close(self, ticket: int, volume: float) -> Dict:
+        """
+        Partially close a position
+        
+        Args:
+            ticket: Position ticket number
+            volume: Volume to close (must be less than position volume)
+        
+        Returns:
+            Dictionary with success status and details
+        """
+        if not self.connected:
+            return {'success': False, 'error': 'Not connected to MT5'}
+        
+        if volume <= 0:
+            return {'success': False, 'error': 'Volume must be greater than 0'}
+        
+        # Get position information
+        position = mt5.positions_get(ticket=ticket)
+        if not position or len(position) == 0:
+            return {'success': False, 'error': f'Position with ticket {ticket} not found'}
+        
+        pos = position[0]
+        
+        if volume >= pos.volume:
+            return {
+                'success': False,
+                'error': f'Volume ({volume}) must be less than position volume ({pos.volume}). Use /close to close fully.'
+            }
+        
+        # Get symbol info for volume step
+        symbol_info = mt5.symbol_info(pos.symbol)
+        if symbol_info:
+            volume_step = symbol_info.volume_step
+            # Round volume to nearest step
+            volume = round(volume / volume_step) * volume_step
+        
+        # Get current price
+        tick = mt5.symbol_info_tick(pos.symbol)
+        if not tick:
+            return {'success': False, 'error': f'Could not get current price for {pos.symbol}'}
+        
+        # Determine close price based on position type
+        if pos.type == mt5.ORDER_TYPE_BUY:
+            price = tick.bid
+            order_type = mt5.ORDER_TYPE_SELL
+        else:
+            price = tick.ask
+            order_type = mt5.ORDER_TYPE_BUY
+        
+        # Create partial close request
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": pos.symbol,
+            "volume": volume,
+            "type": order_type,
+            "position": ticket,
+            "price": price,
+            "deviation": 20,
+            "magic": 234000,
+            "comment": f"Partial close {volume} lots",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        
+        # Send order
+        result = mt5.order_send(request)
+        
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            return {
+                'success': False,
+                'error': f'Failed to partially close position: {result.comment}',
+                'retcode': result.retcode
+            }
+        
+        # Calculate profit for closed portion
+        profit_per_lot = pos.profit / pos.volume if pos.volume > 0 else 0
+        closed_profit = profit_per_lot * volume
+        
+        return {
+            'success': True,
+            'ticket': ticket,
+            'symbol': pos.symbol,
+            'volume_closed': volume,
+            'volume_remaining': pos.volume - volume,
+            'price': price,
+            'profit': closed_profit,
+            'deal_ticket': result.order
+        }
 
