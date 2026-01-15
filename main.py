@@ -483,12 +483,16 @@ class MT5AlertService:
         # Enhance with ML suggestions if available
         ml_suggestions = {}
         if self.ml_analyzer and Config.ENABLE_ML_PROFIT_SUGGESTIONS:
-            positions = self.mt5_monitor.get_positions()
-            for pos in positions:
-                if pos.get('profit', 0) > 0:
-                    ml_suggestion = self.ml_analyzer.get_suggestion(pos, symbol=pos.get('symbol'))
-                    if ml_suggestion:
-                        ml_suggestions[pos.get('ticket')] = ml_suggestion
+            if self.mt5_monitor and self.mt5_monitor.connected:
+                try:
+                    positions = self.mt5_monitor.get_all_positions()
+                    for pos in positions:
+                        if pos.get('profit', 0) > 0:
+                            ml_suggestion = self.ml_analyzer.get_suggestion(pos, symbol=pos.get('symbol'))
+                            if ml_suggestion:
+                                ml_suggestions[pos.get('ticket')] = ml_suggestion
+                except Exception as e:
+                    logger.error(f"Error getting ML suggestions: {e}")
         
         # Send suggestions
         for suggestion in suggestions:
