@@ -297,6 +297,8 @@ class TelegramNotifier:
         win_rate = summary.get('win_rate', 0)
         largest_win = summary.get('largest_win', 0)
         largest_loss = summary.get('largest_loss', 0)
+        best_trade = summary.get('best_trade')
+        worst_trade = summary.get('worst_trade')
         
         profit_emoji = "💰" if total_profit >= 0 else "📉"
         open_emoji = "💰" if open_profit >= 0 else "📉"
@@ -310,11 +312,128 @@ class TelegramNotifier:
         message += f"Win Rate: {win_rate:.1f}%\n"
         message += f"Largest Win: 💰 {largest_win:.2f}\n"
         message += f"Largest Loss: 📉 {largest_loss:.2f}\n\n"
+        
+        if best_trade:
+            message += f"<b>🏆 Best Trade:</b>\n"
+            message += f"{best_trade.get('symbol', 'N/A')} {best_trade.get('type', 'N/A')}\n"
+            message += f"Profit: 💰 {best_trade.get('profit', 0):.2f}\n"
+            message += f"Entry: {best_trade.get('entry_price', 0)} → Exit: {best_trade.get('exit_price', 0)}\n"
+            if best_trade.get('duration'):
+                message += f"Duration: {best_trade.get('duration')}\n"
+            message += "\n"
+        
+        if worst_trade:
+            message += f"<b>📉 Worst Trade:</b>\n"
+            message += f"{worst_trade.get('symbol', 'N/A')} {worst_trade.get('type', 'N/A')}\n"
+            message += f"Loss: 📉 {worst_trade.get('profit', 0):.2f}\n"
+            message += f"Entry: {worst_trade.get('entry_price', 0)} → Exit: {worst_trade.get('exit_price', 0)}\n"
+            if worst_trade.get('duration'):
+                message += f"Duration: {worst_trade.get('duration')}\n"
+            message += "\n"
+        
         message += f"<b>Open Positions:</b>\n"
         message += f"Unrealized P/L: {open_emoji} {open_profit:.2f}\n\n"
         message += f"<b>Total P/L: {profit_emoji} {total_profit + open_profit:.2f}</b>"
         
         return message
+    
+    def format_daily_summary(self, stats: dict) -> str:
+        """Format comprehensive daily performance summary"""
+        if not stats:
+            return "📊 <b>Daily Performance Summary</b>\n\nUnable to retrieve statistics."
+        
+        total_profit = stats.get('total_profit', 0)
+        open_profit = stats.get('open_profit', 0)
+        total_trades = stats.get('total_trades', 0)
+        winning_trades = stats.get('winning_trades', 0)
+        losing_trades = stats.get('losing_trades', 0)
+        break_even_trades = stats.get('break_even_trades', 0)
+        win_rate = stats.get('win_rate', 0)
+        average_win = stats.get('average_win', 0)
+        average_loss = stats.get('average_loss', 0)
+        profit_factor = stats.get('profit_factor', 0)
+        best_trade = stats.get('best_trade')
+        worst_trade = stats.get('worst_trade')
+        total_commission = stats.get('total_commission', 0)
+        total_swap = stats.get('total_swap', 0)
+        total_volume = stats.get('total_volume', 0)
+        
+        profit_emoji = "💰" if total_profit >= 0 else "📉"
+        open_emoji = "💰" if open_profit >= 0 else "📉"
+        
+        from datetime import datetime
+        now = datetime.now()
+        date_str = now.strftime('%Y-%m-%d')
+        
+        message = f"📊 <b>Daily Performance Summary</b>\n"
+        message += f"📅 {date_str}\n"
+        message += "━" * 30 + "\n\n"
+        
+        # Overall Performance
+        message += f"<b>💰 Overall Performance</b>\n"
+        message += f"Closed P/L: {profit_emoji} {total_profit:.2f}\n"
+        message += f"Open P/L: {open_emoji} {open_profit:.2f}\n"
+        message += f"Total P/L: {profit_emoji} {total_profit + open_profit:.2f}\n\n"
+        
+        # Trade Statistics
+        message += f"<b>📈 Trade Statistics</b>\n"
+        message += f"Total Trades: {total_trades}\n"
+        message += f"Winning: 🟢 {winning_trades} | Losing: 🔴 {losing_trades}"
+        if break_even_trades > 0:
+            message += f" | Break-even: ⚪ {break_even_trades}"
+        message += "\n"
+        message += f"Win Rate: {win_rate:.1f}%\n"
+        message += f"Average Win: 💰 {average_win:.2f}\n"
+        message += f"Average Loss: 📉 {average_loss:.2f}\n"
+        message += f"Profit Factor: {profit_factor:.2f}\n\n"
+        
+        # Best/Worst Trades
+        if best_trade:
+            message += f"<b>🏆 Best Trade</b>\n"
+            message += f"Ticket: {best_trade.get('ticket', 'N/A')}\n"
+            message += f"Symbol: {best_trade.get('symbol', 'N/A')} ({best_trade.get('type', 'N/A')})\n"
+            message += f"Profit: 💰 {best_trade.get('profit', 0):.2f}\n"
+            message += f"Volume: {best_trade.get('volume', 0)}\n"
+            message += f"Entry: {best_trade.get('entry_price', 0)} → Exit: {best_trade.get('exit_price', 0)}\n"
+            if best_trade.get('entry_time'):
+                message += f"Time: {best_trade.get('entry_time')} → {best_trade.get('exit_time', 'N/A')}\n"
+            if best_trade.get('duration'):
+                message += f"Duration: {best_trade.get('duration')}\n"
+            message += "\n"
+        
+        if worst_trade:
+            message += f"<b>📉 Worst Trade</b>\n"
+            message += f"Ticket: {worst_trade.get('ticket', 'N/A')}\n"
+            message += f"Symbol: {worst_trade.get('symbol', 'N/A')} ({worst_trade.get('type', 'N/A')})\n"
+            message += f"Loss: 📉 {worst_trade.get('profit', 0):.2f}\n"
+            message += f"Volume: {worst_trade.get('volume', 0)}\n"
+            message += f"Entry: {worst_trade.get('entry_price', 0)} → Exit: {worst_trade.get('exit_price', 0)}\n"
+            if worst_trade.get('entry_time'):
+                message += f"Time: {worst_trade.get('entry_time')} → {worst_trade.get('exit_time', 'N/A')}\n"
+            if worst_trade.get('duration'):
+                message += f"Duration: {worst_trade.get('duration')}\n"
+            message += "\n"
+        
+        # Additional Info
+        if total_volume > 0 or total_commission > 0 or total_swap != 0:
+            message += f"<b>📊 Additional Info</b>\n"
+            if total_volume > 0:
+                message += f"Total Volume: {total_volume:.2f} lots\n"
+            if total_commission > 0:
+                message += f"Total Commission: {total_commission:.2f}\n"
+            if total_swap != 0:
+                message += f"Total Swap: {total_swap:.2f}\n"
+            message += "\n"
+        
+        message += "━" * 30 + "\n"
+        message += f"📅 Period: {stats.get('start_time', 'N/A')} - {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        
+        return message
+    
+    async def send_daily_summary(self, stats: dict) -> bool:
+        """Send daily performance summary to Telegram"""
+        message = self.format_daily_summary(stats)
+        return await self.send_message(message)
     
     def format_help(self) -> str:
         """Format help message for /help command"""

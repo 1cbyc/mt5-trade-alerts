@@ -30,6 +30,7 @@ class MT5AlertService:
         self.sent_profit_suggestions = set()  # Track sent suggestions to avoid spam
         self.sent_risk_alerts = set()  # Track sent risk alerts to avoid spam
         self.initial_balance = None  # Track initial balance for drawdown calculation
+        self.last_daily_summary_date = None  # Track last date daily summary was sent
     
     async def initialize(self):
         """Initialize MT5 and Telegram connections"""
@@ -234,6 +235,37 @@ class MT5AlertService:
                     await self.telegram.send_drawdown_alert(drawdown_alert)
                     self.sent_risk_alerts.add(alert_key)
     
+    async def check_daily_summary(self):
+        """Check if it's time to send daily performance summary"""
+        if not Config.ENABLE_DAILY_SUMMARY:
+            return
+        
+        now = datetime.now()
+        current_date = now.date()
+        
+        # Check if we should send daily summary
+        should_send = False
+        
+        # If we haven't sent today's summary yet
+        if self.last_daily_summary_date != current_date:
+            # Check if current time is at or past the configured summary time
+            summary_time = now.replace(hour=Config.DAILY_SUMMARY_HOUR, minute=Config.DAILY_SUMMARY_MINUTE, second=0, microsecond=0)
+            
+            # If we're past the summary time for today, send it
+            if now >= summary_time:
+                should_send = True
+        
+        if should_send:
+            logger.info("Sending daily performance summary...")
+            stats = self.mt5_monitor.get_trade_statistics(period='daily')
+            if stats and stats.get('total_trades', 0) > 0:
+                await self.telegram.send_daily_summary(stats)
+                self.last_daily_summary_date = current_date
+                logger.info("Daily performance summary sent successfully")
+            else:
+                logger.info("No trades today, skipping daily summary")
+                self.last_daily_summary_date = current_date
+    
     async def run(self):
         """Main event loop"""
         if not await self.initialize():
@@ -273,6 +305,10 @@ class MT5AlertService:
                 # Check risk management alerts (every 10 cycles = ~50 seconds - less frequent due to heavy operations)
                 if check_counter % 10 == 0:
                     await self.check_risk_alerts()
+                
+                # Check daily summary (every 12 cycles = ~60 seconds - check once per minute)
+                if check_counter % 12 == 0:
+                    await self.check_daily_summary()
                 
                 # Wait before next check
                 await asyncio.sleep(Config.PRICE_CHECK_INTERVAL)
