@@ -210,25 +210,6 @@ class MT5AlertService:
         self.volatility_calc = None
         if Config.ENABLE_VOLATILITY_POSITION_SIZING:
             self.volatility_calc = VolatilityCalculator(periods=Config.VOLATILITY_PERIODS)
-        
-        # ML Profit Analyzer
-        self.ml_analyzer = None
-        if Config.ENABLE_ML_PROFIT_SUGGESTIONS and self.trade_db:
-            self.ml_analyzer = MLProfitAnalyzer(
-                trade_db=self.trade_db,
-                min_trades_for_learning=Config.ML_MIN_TRADES_FOR_LEARNING
-            )
-            # Learn from history on startup
-            try:
-                self.ml_analyzer.learn_from_history()
-                logger.info("ML Profit Analyzer initialized and learned from trade history")
-            except Exception as e:
-                logger.error(f"Error initializing ML analyzer: {e}")
-        
-        # Volatility Calculator
-        self.volatility_calc = None
-        if Config.ENABLE_VOLATILITY_POSITION_SIZING:
-            self.volatility_calc = VolatilityCalculator(periods=Config.VOLATILITY_PERIODS)
     
     def _record_trade_to_db(self, trade: Dict):
         """Record a closed trade to the database"""
