@@ -1285,6 +1285,9 @@ class MT5Monitor:
             price = tick.ask  # Close sell position at ask
             order_type = mt5.ORDER_TYPE_BUY
         
+        # Get appropriate filling mode for the symbol
+        filling_mode = self._get_filling_mode(symbol)
+        
         # Create close request
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -1297,7 +1300,7 @@ class MT5Monitor:
             "magic": 234000,
             "comment": "Closed via Telegram",
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": filling_mode,
         }
         
         # Send order
@@ -1483,30 +1486,69 @@ class MT5Monitor:
             'tp': new_tp if new_tp > 0 else None
         }
     
+    def _get_filling_mode(self, symbol: str) -> int:
+        """
+        Get the appropriate filling mode for a symbol
+        
+        Args:
+            symbol: Trading symbol
+        
+        Returns:
+            Filling mode constant (ORDER_FILLING_FOK, ORDER_FILLING_IOC, or ORDER_FILLING_RETURN)
+        """
+        symbol_info = mt5.symbol_info(symbol)
+        if not symbol_info:
+            # Default to IOC if we can't get symbol info
+            return mt5.ORDER_FILLING_IOC
+        
+        # Get filling mode flags (bitmask)
+        filling_mode = getattr(symbol_info, 'filling_mode', 0)
+        
+        # MT5 filling_mode is a bitmask where:
+        # Bit 0 (1) = ORDER_FILLING_FOK supported
+        # Bit 1 (2) = ORDER_FILLING_IOC supported
+        # Bit 2 (4) = ORDER_FILLING_RETURN supported
+        
+        # Try FOK first (Fill or Kill - most restrictive, best for market orders)
+        if filling_mode & 1:  # Check bit 0
+            return mt5.ORDER_FILLING_FOK
+        
+        # Try IOC next (Immediate or Cancel - good for market orders)
+        if filling_mode & 2:  # Check bit 1
+            return mt5.ORDER_FILLING_IOC
+        
+        # Fall back to RETURN (Return - least restrictive)
+        if filling_mode & 4:  # Check bit 2
+            return mt5.ORDER_FILLING_RETURN
+        
+        # If no filling mode is set, default to IOC
+        # This should rarely happen, but provides a fallback
+        return mt5.ORDER_FILLING_IOC
+    
     def partial_close(self, ticket: int, volume: float) -> Dict:
         """
         Partially close a position
-        
+
         Args:
             ticket: Position ticket number
             volume: Volume to close (must be less than position volume)
-        
+
         Returns:
             Dictionary with success status and details
         """
         if not self.connected:
             return {'success': False, 'error': 'Not connected to MT5'}
-        
+
         if volume <= 0:
             return {'success': False, 'error': 'Volume must be greater than 0'}
-        
+
         # Get position information
         position = mt5.positions_get(ticket=ticket)
         if not position or len(position) == 0:
             return {'success': False, 'error': f'Position with ticket {ticket} not found'}
-        
+
         pos = position[0]
-        
+
         # Get symbol info for volume step
         symbol_info = mt5.symbol_info(pos.symbol)
         if symbol_info:
@@ -1531,12 +1573,12 @@ class MT5Monitor:
                     'success': False,
                     'error': f'Volume ({volume}) must be less than position volume ({pos.volume}). Use /close to close fully.'
                 }
-        
+
         # Get current price
         tick = mt5.symbol_info_tick(pos.symbol)
         if not tick:
             return {'success': False, 'error': f'Could not get current price for {pos.symbol}'}
-        
+
         # Determine close price based on position type
         if pos.type == mt5.ORDER_TYPE_BUY:
             price = tick.bid
@@ -1544,7 +1586,10 @@ class MT5Monitor:
         else:
             price = tick.ask
             order_type = mt5.ORDER_TYPE_BUY
-        
+
+        # Get appropriate filling mode for the symbol
+        filling_mode = self._get_filling_mode(pos.symbol)
+
         # Create partial close request
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -1557,9 +1602,9 @@ class MT5Monitor:
             "magic": 234000,
             "comment": f"Partial close {volume} lots",
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": filling_mode,
         }
-        
+
         # Send order
         result = mt5.order_send(request)
         
