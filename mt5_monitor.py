@@ -1058,8 +1058,19 @@ class MT5Monitor:
             'start_time': start_time.strftime('%Y-%m-%d %H:%M:%S')
         }
     
-    def check_margin_level(self, warning_threshold: float, critical_threshold: float) -> Optional[Dict]:
-        """Check margin level and return alert if below thresholds"""
+    def check_margin_level(self, warning_threshold: float, critical_threshold: float, 
+                          min_balance_threshold: float = 25.0) -> Optional[Dict]:
+        """
+        Check margin level and return alert if below thresholds
+        
+        Args:
+            warning_threshold: Warning threshold for margin level (%)
+            critical_threshold: Critical threshold for margin level (%)
+            min_balance_threshold: Minimum balance to consider for alerts (default $25)
+        
+        Returns:
+            Alert dictionary if margin level is below threshold, None otherwise
+        """
         if not self.connected:
             return None
         
@@ -1067,7 +1078,17 @@ class MT5Monitor:
         if not account_info:
             return None
         
-        margin_level = account_info.margin_level if account_info.margin > 0 else 0
+        # Only check margin level if there are open positions (margin > 0)
+        # If no positions, margin level is 0% which is normal, not an alert condition
+        if account_info.margin <= 0:
+            return None
+        
+        # Only alert if balance is below minimum threshold (e.g., $25)
+        # This prevents false alerts for accounts with normal balances
+        if account_info.balance >= min_balance_threshold:
+            return None
+        
+        margin_level = account_info.margin_level
         
         if margin_level <= critical_threshold:
             return {

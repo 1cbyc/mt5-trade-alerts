@@ -10,6 +10,10 @@ from telegram_bot import TelegramNotifier
 from config import Config
 from trade_history import TradeHistoryDB
 from chart_generator import ChartGenerator
+from ml_profit_analyzer import MLProfitAnalyzer
+from volatility_calculator import VolatilityCalculator
+from ml_profit_analyzer import MLProfitAnalyzer
+from volatility_calculator import VolatilityCalculator
 
 logging.basicConfig(
     level=logging.INFO,
@@ -187,6 +191,25 @@ class MT5AlertService:
         
         # Chart generator
         self.chart_generator = ChartGenerator() if Config.ENABLE_CHARTS else None
+        
+        # ML Profit Analyzer
+        self.ml_analyzer = None
+        if Config.ENABLE_ML_PROFIT_SUGGESTIONS and self.trade_db:
+            self.ml_analyzer = MLProfitAnalyzer(
+                trade_db=self.trade_db,
+                min_trades_for_learning=Config.ML_MIN_TRADES_FOR_LEARNING
+            )
+            # Learn from history on startup
+            try:
+                self.ml_analyzer.learn_from_history()
+                logger.info("ML Profit Analyzer initialized and learned from trade history")
+            except Exception as e:
+                logger.error(f"Error initializing ML analyzer: {e}")
+        
+        # Volatility Calculator
+        self.volatility_calc = None
+        if Config.ENABLE_VOLATILITY_POSITION_SIZING:
+            self.volatility_calc = VolatilityCalculator(periods=Config.VOLATILITY_PERIODS)
     
     def _record_trade_to_db(self, trade: Dict):
         """Record a closed trade to the database"""
@@ -287,6 +310,10 @@ class MT5AlertService:
             self.telegram.set_trade_db(self.trade_db)
         if self.chart_generator:
             self.telegram.set_chart_generator(self.chart_generator)
+        if self.ml_analyzer:
+            self.telegram.ml_analyzer = self.ml_analyzer
+        if self.volatility_calc:
+            self.telegram.volatility_calc = self.volatility_calc
         
         # Setup command handlers
         await self.telegram.setup_commands()
@@ -447,18 +474,94 @@ class MT5AlertService:
         if not Config.ENABLE_PROFIT_SUGGESTIONS:
             return
         
+        # Get basic profit suggestions
         suggestions = self.mt5_monitor.analyze_profitable_positions(
             min_profit=Config.MIN_PROFIT_FOR_SUGGESTION,
             profit_percentage=Config.PROFIT_PERCENTAGE_THRESHOLD
         )
         
+        # Enhance with ML suggestions if available
+        ml_suggestions = {}
+        if self.ml_analyzer and Config.ENABLE_ML_PROFIT_SUGGESTIONS:
+            if self.mt5_monitor and self.mt5_monitor.connected:
+                try:
+                    positions = self.mt5_monitor.get_all_positions()
+                    for pos in positions:
+                        if pos.get('profit', 0) > 0:
+                            ml_suggestion = self.ml_analyzer.get_suggestion(pos, symbol=pos.get('symbol'))
+                            if ml_suggestion:
+                                ml_suggestions[pos.get('ticket')] = ml_suggestion
+                except Exception as e:
+                    logger.error(f"Error getting ML suggestions: {e}")
+        
+        # Send suggestions
         for suggestion in suggestions:
             suggestion_key = f"profit_{suggestion['ticket']}"
             if suggestion_key not in self.sent_profit_suggestions:
-                logger.info(f"Profit suggestion for {suggestion['symbol']} - Ticket {suggestion['ticket']}: {suggestion['profit']:.2f}")
+                ticket = suggestion['ticket']
+                
+                # Enhance with ML data if available
+                if ticket in ml_suggestions:
+                    ml_data = ml_suggestions[ticket]
+                    suggestion['ml_enhanced'] = True
+                    suggestion['ml_confidence'] = ml_data.get('confidence', 'low')
+                    suggestion['ml_reason'] = ml_data.get('reason', '')
+                    suggestion['ml_learned_target'] = ml_data.get('learned_avg_target', 0)
+                    # Use ML suggestion for volume if confidence is high
+                    if ml_data.get('confidence') in ['high', 'very_high']:
+                        suggestion['volume_to_close'] = ml_data.get('volume_to_close', suggestion.get('volume_to_close', 0))
+                else:
+                    suggestion['ml_enhanced'] = False
+                
+                logger.info(f"Profit suggestion for {suggestion['symbol']} - Ticket {ticket}: {suggestion['profit']:.2f}")
                 message = self.telegram.format_profit_suggestion(suggestion)
                 await self._send_alert_safe(message, alert_type='risk', priority='normal')
                 self.sent_profit_suggestions.add(suggestion_key)
+    
+    async def check_volatility_position_sizing(self):
+        """Check position sizes against volatility-based suggestions"""
+        if not Config.ENABLE_VOLATILITY_POSITION_SIZING or not self.volatility_calc:
+            return
+        
+        if not self.mt5_monitor or not self.mt5_monitor.connected:
+            return
+        
+        try:
+            account_info = self.mt5_monitor.get_account_info()
+            if not account_info:
+                return
+            
+            account_balance = account_info.get('balance', 0)
+            if account_balance <= 0:
+                return
+            
+            # Get positions from MT5
+            import MetaTrader5 as mt5
+            positions = mt5.positions_get()
+            if positions:
+                for pos in positions:
+                    symbol = pos.symbol
+                    volume = pos.volume
+                    
+                    if not symbol or volume <= 0:
+                        continue
+                    
+                    # Check if position size is appropriate for current volatility
+                    alert = self.volatility_calc.get_volatility_alert(
+                        symbol=symbol,
+                        current_volume=volume,
+                        account_balance=account_balance
+                    )
+                    
+                    if alert:
+                        alert_key = f"volatility_{symbol}_{pos.ticket}"
+                        if alert_key not in self.sent_risk_alerts:
+                            logger.info(f"Volatility position sizing alert for {symbol}")
+                            message = self.telegram.format_volatility_alert(alert)
+                            await self._send_alert_safe(message, alert_type='risk', priority='normal')
+                            self.sent_risk_alerts.add(alert_key)
+        except Exception as e:
+            logger.error(f"Error checking volatility position sizing: {e}")
     
     async def check_risk_alerts(self):
         """Check for risk management alerts"""
@@ -468,7 +571,8 @@ class MT5AlertService:
         # Check margin level
         margin_alert = self.mt5_monitor.check_margin_level(
             warning_threshold=Config.MARGIN_LEVEL_WARNING,
-            critical_threshold=Config.MARGIN_LEVEL_CRITICAL
+            critical_threshold=Config.MARGIN_LEVEL_CRITICAL,
+            min_balance_threshold=Config.MARGIN_ALERT_MIN_BALANCE
         )
         if margin_alert:
             alert_key = f"margin_{margin_alert['type']}_{margin_alert['margin_level']:.1f}"
@@ -801,6 +905,10 @@ class MT5AlertService:
                 # Check profit suggestions (every 3 cycles = ~15 seconds)
                 if check_counter % 3 == 0:
                     await self.check_profit_suggestions()
+                
+                # Check volatility position sizing (every 5 cycles = ~25 seconds)
+                if check_counter % 5 == 0:
+                    await self.check_volatility_position_sizing()
                 
                 # Check risk management alerts (every 10 cycles = ~50 seconds - less frequent due to heavy operations)
                 if check_counter % 10 == 0:
