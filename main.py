@@ -77,6 +77,9 @@ class MT5AlertService:
         self.price_levels = Config.load_price_levels()
         if self.price_levels:
             logger.info(f"Loaded price levels for {len(self.price_levels)} symbols")
+            # Initialize triggered_levels with levels that are already crossed
+            # This prevents alerts on startup for levels that were already crossed
+            await self._initialize_triggered_levels()
         
         # Initialize monitored symbols from config
         self.monitored_symbols = set(Config.MONITORED_SYMBOLS)
@@ -89,6 +92,27 @@ class MT5AlertService:
             logger.info(f"Initial balance tracked: {self.initial_balance}")
         
         return True
+    
+    async def _initialize_triggered_levels(self):
+        """Initialize triggered_levels set with levels that are already crossed on startup"""
+        if not Config.ENABLE_PRICE_ALERTS:
+            return
+        
+        logger.info("Initializing price level state (marking already-crossed levels as triggered)...")
+        
+        for symbol, levels in self.price_levels.items():
+            triggered = self.mt5_monitor.check_price_levels(symbol, levels)
+            for alert in triggered:
+                level_key = f"{symbol}_{alert['level_id']}"
+                is_recurring = alert.get('recurring', False)
+                
+                # Only mark one-time alerts as triggered (recurring alerts should still fire)
+                if not is_recurring:
+                    self.triggered_levels.add(level_key)
+                    logger.debug(f"Marked {level_key} as already triggered (price already crossed)")
+        
+        if self.triggered_levels:
+            logger.info(f"Marked {len(self.triggered_levels)} price level(s) as already triggered on startup")
     
     async def check_trades(self):
         """Check for new trades and send alerts"""
