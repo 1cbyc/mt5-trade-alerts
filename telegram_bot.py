@@ -479,15 +479,23 @@ class TelegramNotifier:
     def format_help(self) -> str:
         """Format help message for /help command"""
         message = "🤖 <b>MT5 Trade Alerts Bot - Commands</b>\n\n"
-        message += "<b>Available Commands:</b>\n\n"
+        message += "<b>📊 Information Commands:</b>\n"
         message += "/status - Show account balance, equity, margin, and open positions count\n"
         message += "/positions - List all open positions with current P/L\n"
         message += "/orders - List all pending orders\n"
         message += "/summary - Show daily P/L summary\n"
         message += "/summary weekly - Show weekly P/L summary\n"
-        message += "/summary monthly - Show monthly P/L summary\n"
+        message += "/summary monthly - Show monthly P/L summary\n\n"
+        message += "<b>⚡ Trading Commands:</b>\n"
+        message += "/close &lt;ticket&gt; - Close specific position\n"
+        message += "/closeall - Close all open positions\n"
+        message += "/modify &lt;ticket&gt; [sl] [tp] - Modify stop loss/take profit\n"
+        message += "  Example: /modify 123456 1.1000 1.1100\n"
+        message += "  Use 0 to remove SL/TP\n"
+        message += "/partial &lt;ticket&gt; &lt;volume&gt; - Partially close position\n"
+        message += "  Example: /partial 123456 0.5\n\n"
         message += "/help - Show this help message\n\n"
-        message += "The bot automatically sends alerts for:\n"
+        message += "<b>🔔 Automatic Alerts:</b>\n"
         message += "• New trades (open/close)\n"
         message += "• New orders (pending/executed)\n"
         message += "• Price level alerts\n"
@@ -569,6 +577,164 @@ class TelegramNotifier:
         message = self.format_help()
         await update.message.reply_text(message, parse_mode='HTML')
     
+    async def handle_close(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /close <ticket> command"""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+        
+        if not self.mt5_monitor:
+            await update.message.reply_text("❌ MT5 monitor not available.")
+            return
+        
+        if not context.args or len(context.args) == 0:
+            await update.message.reply_text("❌ Usage: /close <ticket>\nExample: /close 123456")
+            return
+        
+        try:
+            ticket = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("❌ Invalid ticket number. Ticket must be a number.")
+            return
+        
+        result = self.mt5_monitor.close_position(ticket)
+        
+        if result.get('success'):
+            message = f"✅ <b>Position Closed</b>\n\n"
+            message += f"Ticket: {result.get('ticket')}\n"
+            message += f"Symbol: {result.get('symbol')}\n"
+            message += f"Volume: {result.get('volume')}\n"
+            message += f"Price: {result.get('price')}\n"
+            profit = result.get('profit', 0)
+            profit_emoji = "💰" if profit >= 0 else "📉"
+            message += f"Profit: {profit_emoji} {profit:.2f}\n"
+            message += f"Deal Ticket: {result.get('deal_ticket')}"
+        else:
+            message = f"❌ <b>Failed to Close Position</b>\n\n"
+            message += f"Error: {result.get('error', 'Unknown error')}"
+        
+        await update.message.reply_text(message, parse_mode='HTML')
+    
+    async def handle_closeall(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /closeall command"""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+        
+        if not self.mt5_monitor:
+            await update.message.reply_text("❌ MT5 monitor not available.")
+            return
+        
+        result = self.mt5_monitor.close_all_positions()
+        
+        if result.get('success'):
+            message = f"✅ <b>Close All Positions</b>\n\n"
+            message += f"Closed: {result.get('closed_count')} positions\n"
+            message += f"Failed: {result.get('failed_count')} positions\n"
+            message += f"Total: {result.get('total_positions')} positions\n"
+            total_profit = result.get('total_profit', 0)
+            profit_emoji = "💰" if total_profit >= 0 else "📉"
+            message += f"\nTotal Profit: {profit_emoji} {total_profit:.2f}"
+            
+            if result.get('errors'):
+                message += f"\n\n⚠️ <b>Errors:</b>\n"
+                for error in result.get('errors', [])[:5]:  # Show first 5 errors
+                    message += f"• {error}\n"
+                if len(result.get('errors', [])) > 5:
+                    message += f"... and {len(result.get('errors', [])) - 5} more"
+        else:
+            message = f"ℹ️ {result.get('message', 'No positions to close')}"
+        
+        await update.message.reply_text(message, parse_mode='HTML')
+    
+    async def handle_modify(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /modify <ticket> <sl> <tp> command"""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+        
+        if not self.mt5_monitor:
+            await update.message.reply_text("❌ MT5 monitor not available.")
+            return
+        
+        if not context.args or len(context.args) < 1:
+            await update.message.reply_text("❌ Usage: /modify <ticket> [sl] [tp]\nExample: /modify 123456 1.1000 1.1100\nUse 0 to remove SL/TP")
+            return
+        
+        try:
+            ticket = int(context.args[0])
+            sl = float(context.args[1]) if len(context.args) > 1 and context.args[1].lower() != 'none' else None
+            tp = float(context.args[2]) if len(context.args) > 2 and context.args[2].lower() != 'none' else None
+            
+            # Convert 0 to None (remove SL/TP)
+            if sl == 0:
+                sl = None
+            if tp == 0:
+                tp = None
+        except (ValueError, IndexError):
+            await update.message.reply_text("❌ Invalid arguments. Usage: /modify <ticket> [sl] [tp]\nExample: /modify 123456 1.1000 1.1100")
+            return
+        
+        result = self.mt5_monitor.modify_position(ticket, sl=sl, tp=tp)
+        
+        if result.get('success'):
+            message = f"✅ <b>Position Modified</b>\n\n"
+            message += f"Ticket: {result.get('ticket')}\n"
+            message += f"Symbol: {result.get('symbol')}\n"
+            if result.get('sl') is not None:
+                message += f"Stop Loss: {result.get('sl')}\n"
+            else:
+                message += f"Stop Loss: Removed\n"
+            if result.get('tp') is not None:
+                message += f"Take Profit: {result.get('tp')}\n"
+            else:
+                message += f"Take Profit: Removed\n"
+        else:
+            message = f"❌ <b>Failed to Modify Position</b>\n\n"
+            message += f"Error: {result.get('error', 'Unknown error')}"
+        
+        await update.message.reply_text(message, parse_mode='HTML')
+    
+    async def handle_partial(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /partial <ticket> <volume> command"""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+        
+        if not self.mt5_monitor:
+            await update.message.reply_text("❌ MT5 monitor not available.")
+            return
+        
+        if not context.args or len(context.args) < 2:
+            await update.message.reply_text("❌ Usage: /partial <ticket> <volume>\nExample: /partial 123456 0.5")
+            return
+        
+        try:
+            ticket = int(context.args[0])
+            volume = float(context.args[1])
+        except (ValueError, IndexError):
+            await update.message.reply_text("❌ Invalid arguments. Usage: /partial <ticket> <volume>\nExample: /partial 123456 0.5")
+            return
+        
+        result = self.mt5_monitor.partial_close(ticket, volume)
+        
+        if result.get('success'):
+            message = f"✅ <b>Position Partially Closed</b>\n\n"
+            message += f"Ticket: {result.get('ticket')}\n"
+            message += f"Symbol: {result.get('symbol')}\n"
+            message += f"Volume Closed: {result.get('volume_closed')}\n"
+            message += f"Volume Remaining: {result.get('volume_remaining')}\n"
+            message += f"Price: {result.get('price')}\n"
+            profit = result.get('profit', 0)
+            profit_emoji = "💰" if profit >= 0 else "📉"
+            message += f"Profit: {profit_emoji} {profit:.2f}\n"
+            message += f"Deal Ticket: {result.get('deal_ticket')}"
+        else:
+            message = f"❌ <b>Failed to Partially Close Position</b>\n\n"
+            message += f"Error: {result.get('error', 'Unknown error')}"
+        
+        await update.message.reply_text(message, parse_mode='HTML')
+    
     async def setup_commands(self):
         """Setup command handlers"""
         if not self.application:
@@ -579,6 +745,10 @@ class TelegramNotifier:
             self.application.add_handler(CommandHandler("positions", self.handle_positions))
             self.application.add_handler(CommandHandler("orders", self.handle_orders))
             self.application.add_handler(CommandHandler("summary", self.handle_summary))
+            self.application.add_handler(CommandHandler("close", self.handle_close))
+            self.application.add_handler(CommandHandler("closeall", self.handle_closeall))
+            self.application.add_handler(CommandHandler("modify", self.handle_modify))
+            self.application.add_handler(CommandHandler("partial", self.handle_partial))
             self.application.add_handler(CommandHandler("help", self.handle_help))
             self.application.add_handler(CommandHandler("start", self.handle_help))
             
