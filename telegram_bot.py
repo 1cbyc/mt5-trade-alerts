@@ -428,6 +428,106 @@ class TelegramNotifier:
             await self.application.updater.start_polling(drop_pending_updates=True)
             logger.info("Telegram bot command handlers initialized")
     
+    def format_margin_alert(self, alert: dict) -> str:
+        """Format margin level alert"""
+        alert_type = alert.get('type', 'warning')
+        margin_level = alert.get('margin_level', 0)
+        threshold = alert.get('threshold', 0)
+        
+        if alert_type == 'critical':
+            emoji = "🚨"
+            title = "CRITICAL: Margin Call Warning"
+            urgency = "URGENT"
+        else:
+            emoji = "⚠️"
+            title = "Margin Level Warning"
+            urgency = "Warning"
+        
+        message = f"{emoji} <b>{title}</b>\n\n"
+        message += f"Margin Level: {margin_level:.2f}%\n"
+        message += f"Threshold: {threshold:.2f}%\n\n"
+        message += f"Balance: {alert.get('balance', 0):.2f}\n"
+        message += f"Equity: {alert.get('equity', 0):.2f}\n"
+        message += f"Margin: {alert.get('margin', 0):.2f}\n"
+        message += f"Free Margin: {alert.get('free_margin', 0):.2f}\n\n"
+        message += f"<b>{urgency}:</b> Your margin level is critically low. Consider closing positions or adding funds."
+        
+        return message
+    
+    def format_position_size_alert(self, alert: dict) -> str:
+        """Format position size warning alert"""
+        emoji = "⚠️"
+        
+        message = f"{emoji} <b>Position Size Warning</b>\n\n"
+        message += f"Symbol: {alert.get('symbol', 'N/A')}\n"
+        message += f"Ticket: {alert.get('ticket', 'N/A')}\n"
+        message += f"Volume: {alert.get('volume', 0)}\n\n"
+        message += f"Position Size: {alert.get('position_size_pct', 0):.2f}% of account\n"
+        message += f"Maximum Allowed: {alert.get('max_size_pct', 0):.2f}%\n"
+        message += f"Margin Used: {alert.get('margin_used', 0):.2f}\n"
+        message += f"Account Balance: {alert.get('balance', 0):.2f}\n\n"
+        message += f"⚠️ This position is larger than your risk management limit!"
+        
+        return message
+    
+    def format_daily_loss_alert(self, alert: dict) -> str:
+        """Format daily loss limit alert"""
+        emoji = "🚨"
+        alert_type = alert.get('type', 'daily_loss_pct')
+        
+        message = f"{emoji} <b>Daily Loss Limit Alert</b>\n\n"
+        
+        if alert_type == 'daily_loss_pct':
+            message += f"Daily Loss: {alert.get('daily_loss', 0):.2f}\n"
+            message += f"Loss Percentage: {alert.get('loss_pct', 0):.2f}%\n"
+            message += f"Limit: {alert.get('limit_pct', 0):.2f}%\n"
+        else:
+            message += f"Daily Loss: {alert.get('daily_loss', 0):.2f}\n"
+            message += f"Loss Limit: {alert.get('loss_limit', 0):.2f}\n"
+        
+        message += f"\nBalance: {alert.get('balance', 0):.2f}\n"
+        message += f"Closed P/L: {alert.get('closed_profit', 0):.2f}\n"
+        message += f"Open P/L: {alert.get('open_profit', 0):.2f}\n\n"
+        message += f"🚨 Your daily loss limit has been exceeded. Consider stopping trading for today."
+        
+        return message
+    
+    def format_drawdown_alert(self, alert: dict) -> str:
+        """Format drawdown alert"""
+        emoji = "📉"
+        
+        message = f"{emoji} <b>Drawdown Alert</b>\n\n"
+        message += f"Drawdown: {alert.get('drawdown_pct', 0):.2f}%\n"
+        message += f"Limit: {alert.get('limit_pct', 0):.2f}%\n"
+        message += f"Drawdown Amount: {alert.get('drawdown_amount', 0):.2f}\n\n"
+        message += f"Initial Balance: {alert.get('initial_balance', 0):.2f}\n"
+        message += f"Current Balance: {alert.get('current_balance', 0):.2f}\n"
+        message += f"Equity: {alert.get('equity', 0):.2f}\n"
+        message += f"Total P/L: {alert.get('profit', 0):.2f}\n\n"
+        message += f"📉 Your account drawdown has exceeded the limit. Review your risk management."
+        
+        return message
+    
+    async def send_margin_alert(self, alert: dict) -> bool:
+        """Send margin level alert"""
+        message = self.format_margin_alert(alert)
+        return await self.send_message(message)
+    
+    async def send_position_size_alert(self, alert: dict) -> bool:
+        """Send position size warning alert"""
+        message = self.format_position_size_alert(alert)
+        return await self.send_message(message)
+    
+    async def send_daily_loss_alert(self, alert: dict) -> bool:
+        """Send daily loss limit alert"""
+        message = self.format_daily_loss_alert(alert)
+        return await self.send_message(message)
+    
+    async def send_drawdown_alert(self, alert: dict) -> bool:
+        """Send drawdown alert"""
+        message = self.format_drawdown_alert(alert)
+        return await self.send_message(message)
+    
     async def stop_commands(self):
         """Stop command handlers"""
         if self.application:
