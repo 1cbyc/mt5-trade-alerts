@@ -9,6 +9,13 @@ Get real-time Telegram alerts for your MetaTrader 5 trades, orders, and price le
 - **Price Level Alerts**: Set custom price levels and get alerts when they're reached
 - **Profit Tracking**: See profit/loss information in real-time
 - **Real-time Monitoring**: Continuous monitoring with configurable intervals
+- **Interactive Commands**: Full Telegram bot with commands for trade management
+- **Trade Automation**: Close, modify, and partially close positions via Telegram
+- **Historical Analytics**: Trade history database with charts and statistics
+- **ML-based Suggestions**: AI learns from your trading patterns to suggest optimal exits
+- **Volatility Analysis**: Position sizing suggestions based on market volatility
+- **Trade Journal**: Add notes to trades for later review
+- **CSV Export**: Export trade data for external analysis
 
 ## How it works
 1. Monitors Volatility 25 Index and Step Index for price movements
@@ -120,6 +127,7 @@ The service will:
 2. Connect to Telegram
 3. Start monitoring trades, orders, and price levels
 4. Send alerts to your Telegram chat
+5. Enable interactive Telegram commands for trade management and analytics
 
 ### Stop the Service
 
@@ -174,6 +182,210 @@ You can edit `price_levels.json` directly or use the provided utility script:
 ```bash
 python manage_levels.py
 ```
+
+## Telegram Commands
+
+The bot supports various commands for monitoring and managing your trades. Send these commands directly to your bot in Telegram.
+
+### Account & Position Commands
+
+#### `/status`
+View your account status including balance, equity, margin, and open positions count.
+
+**Example:**
+```
+/status
+```
+
+#### `/positions`
+List all open positions with current profit/loss information.
+
+**Example:**
+```
+/positions
+```
+
+#### `/orders`
+List all pending orders (buy limits, sell limits, stop orders, etc.).
+
+**Example:**
+```
+/orders
+```
+
+#### `/summary`
+Get a daily/weekly P/L summary with trade statistics.
+
+**Example:**
+```
+/summary
+```
+
+### Trade Management Commands
+
+#### `/close <ticket>`
+Close a specific position by ticket number.
+
+**Example:**
+```
+/close 12345678
+```
+
+#### `/closeall`
+Close all open positions at once.
+
+**Example:**
+```
+/closeall
+```
+
+#### `/modify <ticket> <sl> <tp>`
+Modify stop loss and/or take profit for a position.
+
+**Parameters:**
+- `ticket`: Position ticket number
+- `sl`: New stop loss price (use `0` to remove, omit to keep current)
+- `tp`: New take profit price (use `0` to remove, omit to keep current)
+
+**Examples:**
+```
+/modify 12345678 1.0950 1.1050
+/modify 12345678 0 1.1050    # Remove SL, set TP
+/modify 12345678 1.0950 0    # Set SL, remove TP
+```
+
+#### `/partial <ticket> <volume>`
+Partially close a position.
+
+**Parameters:**
+- `ticket`: Position ticket number
+- `volume`: Volume to close (must be less than position volume)
+
+**Example:**
+```
+/partial 12345678 0.5
+```
+
+### Analytics & History Commands
+
+#### `/chart [type] [days]`
+Generate and send performance charts as images.
+
+**Parameters:**
+- `type`: Chart type - `summary` (default), `equity`, `daily`, or `distribution`
+- `days`: Number of days to analyze (default: 30)
+
+**Examples:**
+```
+/chart                    # Summary chart for last 30 days
+/chart summary 60         # Summary chart for last 60 days
+/chart equity 30          # Equity curve for last 30 days
+/chart daily 14           # Daily P/L chart for last 14 days
+/chart distribution 30    # Win/loss distribution for last 30 days
+```
+
+#### `/history [days=X] [symbol=X] [limit=X]`
+View your trade history with optional filters.
+
+**Parameters:**
+- `days=X`: Number of days to look back (default: 7)
+- `symbol=X`: Filter by symbol (e.g., `EURUSD`)
+- `limit=X`: Maximum number of trades to show (default: 20)
+
+**Examples:**
+```
+/history                          # Last 7 days, 20 trades
+/history days=30                  # Last 30 days
+/history symbol=EURUSD            # Only EURUSD trades
+/history days=7 limit=10          # Last 7 days, top 10 trades
+/history days=30 symbol=GBPUSD limit=5
+```
+
+#### `/note <ticket> <note>`
+Add a note to a trade in your journal.
+
+**Parameters:**
+- `ticket`: Trade ticket number
+- `note`: Your note text
+
+**Example:**
+```
+/note 12345678 Good entry, followed trend perfectly
+```
+
+#### `/export [days=X] [symbol=X]`
+Export trade history to CSV file.
+
+**Parameters:**
+- `days=X`: Number of days to export (default: all)
+- `symbol=X`: Filter by symbol (optional)
+
+**Examples:**
+```
+/export                    # Export all trades
+/export days=30            # Export last 30 days
+/export symbol=EURUSD     # Export only EURUSD trades
+/export days=90 symbol=GBPUSD
+```
+
+### Smart Features Commands
+
+#### `/mlinsights [symbol]`
+View ML-learned trading insights and patterns.
+
+**Parameters:**
+- `symbol`: Optional symbol to analyze (default: all symbols)
+
+**Examples:**
+```
+/mlinsights                # Overall insights
+/mlinsights EURUSD         # Symbol-specific insights
+```
+
+**Shows:**
+- Win rate and trade statistics
+- Average profit targets
+- Average hold times
+- Risk/reward ratios
+- Profit distribution patterns
+
+#### `/volatility <symbol>`
+View volatility metrics and position sizing suggestions.
+
+**Parameters:**
+- `symbol`: Trading symbol to analyze
+
+**Example:**
+```
+/volatility EURUSD
+```
+
+**Shows:**
+- Current volatility level (low/medium/high/very_high)
+- ATR (Average True Range)
+- Standard deviation
+- Suggested position size based on volatility
+- Risk calculations
+
+### Help Command
+
+#### `/help` or `/start`
+Show the complete list of available commands with descriptions.
+
+**Example:**
+```
+/help
+```
+
+## Command Categories Summary
+
+| Category | Commands |
+|----------|----------|
+| **Account Info** | `/status`, `/positions`, `/orders`, `/summary` |
+| **Trade Management** | `/close`, `/closeall`, `/modify`, `/partial` |
+| **Analytics** | `/chart`, `/history`, `/note`, `/export` |
+| **Smart Features** | `/mlinsights`, `/volatility` |
+| **Help** | `/help`, `/start` |
 
 ## Troubleshooting
 
