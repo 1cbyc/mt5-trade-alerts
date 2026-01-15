@@ -193,19 +193,60 @@ class TelegramNotifier:
         price_open = suggestion.get('price_open', 0)
         price_current = suggestion.get('price_current', 0)
         
-        emoji = "💡"
+        # Check if ML-enhanced
+        ml_enhanced = suggestion.get('ml_enhanced', False)
+        emoji = "🤖" if ml_enhanced else "💡"
         
-        message = f"{emoji} <b>Profit-Taking Suggestion</b>\n\n"
+        message = f"{emoji} <b>Profit-Taking Suggestion</b>"
+        if ml_enhanced:
+            message += " <i>(ML-Enhanced)</i>"
+        message += "\n\n"
+        
         message += f"Symbol: {symbol}\n"
         message += f"Ticket: {ticket}\n"
         message += f"Type: {trade_type}\n"
         message += f"Current Profit: 💰 {profit:.2f} ({profit_pct:.2f}%)\n"
         message += f"Open Price: {price_open}\n"
         message += f"Current Price: {price_current}\n"
-        message += f"\n💡 <b>Suggestion:</b> Consider closing {volume_to_close} lots (50% of position) to secure profits\n"
+        
+        if ml_enhanced:
+            ml_confidence = suggestion.get('ml_confidence', 'low')
+            ml_reason = suggestion.get('ml_reason', '')
+            learned_target = suggestion.get('ml_learned_target', 0)
+            
+            confidence_emoji = "🔥" if ml_confidence == 'very_high' else "⭐" if ml_confidence == 'high' else "💭"
+            message += f"\n{confidence_emoji} <b>ML Analysis:</b>\n"
+            message += f"Confidence: {ml_confidence.upper()}\n"
+            if learned_target > 0:
+                message += f"Your avg exit target: {learned_target:.2f}%\n"
+            if ml_reason:
+                message += f"Reason: {ml_reason}\n"
+        
+        message += f"\n💡 <b>Suggestion:</b> Consider closing {volume_to_close} lots to secure profits\n"
         message += f"Remaining: {volume - volume_to_close} lots"
         
         return message
+    
+    def format_volatility_alert(self, alert: dict) -> str:
+        """Format volatility-based position sizing alert for Telegram"""
+        symbol = alert.get('symbol', 'N/A')
+        current_volume = alert.get('current_volume', 0)
+        suggested_volume = alert.get('suggested_volume', 0)
+        volatility_level = alert.get('volatility_level', 'N/A')
+        recommendation = alert.get('recommendation', '')
+        message_text = alert.get('message', '')
+        
+        emoji = "⚠️" if alert.get('type') == 'position_too_large' else "💡"
+        
+        alert_message = f"{emoji} <b>Volatility Position Sizing Alert</b>\n\n"
+        alert_message += f"Symbol: {symbol}\n"
+        alert_message += f"Current Volume: {current_volume}\n"
+        alert_message += f"Suggested Volume: {suggested_volume}\n"
+        alert_message += f"Volatility Level: {volatility_level.upper()}\n"
+        alert_message += f"\n{message_text}\n"
+        alert_message += f"\n<b>Recommendation:</b> {recommendation}"
+        
+        return alert_message
     
     async def send_profit_suggestion(self, suggestion: dict) -> bool:
         """Send profit-taking suggestion to Telegram"""
@@ -517,6 +558,11 @@ class TelegramNotifier:
         message += "  Example: /note 123456 Good entry point\n"
         message += "/export [days=X] [symbol=X] - Export trades to CSV\n"
         message += "  Example: /export days=30 symbol=EURUSD\n\n"
+        message += "<b>🤖 Smart Features:</b>\n"
+        message += "/mlinsights [symbol] - Show ML trading insights\n"
+        message += "  Example: /mlinsights EURUSD\n"
+        message += "/volatility &lt;symbol&gt; - Show volatility and position sizing\n"
+        message += "  Example: /volatility EURUSD\n\n"
         message += "/help - Show this help message\n\n"
         message += "<b>🔔 Automatic Alerts:</b>\n"
         message += "• New trades (open/close)\n"
@@ -990,6 +1036,114 @@ class TelegramNotifier:
         
         await update.message.reply_text(message, parse_mode='HTML')
     
+    async def handle_ml_insights(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /mlinsights command - Show ML trading insights"""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+        
+        if not self.trade_db:
+            await update.message.reply_text("❌ Trade history not available.")
+            return
+        
+        # Get ML analyzer from main service (will be set)
+        if not hasattr(self, 'ml_analyzer') or not self.ml_analyzer:
+            await update.message.reply_text("❌ ML analyzer not available.")
+            return
+        
+        symbol = None
+        if context.args and len(context.args) > 0:
+            symbol = context.args[0]
+        
+        # Get insights
+        insights = self.ml_analyzer.get_insights(symbol=symbol)
+        
+        if not insights.get('available'):
+            await update.message.reply_text(f"❌ {insights.get('message', 'No insights available')}")
+            return
+        
+        message = "🤖 <b>ML Trading Insights</b>\n\n"
+        if symbol:
+            message += f"Symbol: {symbol}\n"
+        message += f"Trades Analyzed: {insights['trades_analyzed']}\n"
+        message += f"Winning Trades: {insights['winning_trades']}\n"
+        message += f"Losing Trades: {insights['losing_trades']}\n"
+        message += f"Win Rate: {insights['win_rate']:.1f}%\n\n"
+        
+        message += "<b>Learned Patterns:</b>\n"
+        message += f"Avg Winning Profit: {insights['avg_winning_profit']:.2f}\n"
+        message += f"Avg Profit Target: {insights['avg_profit_target_pct']:.2f}%\n"
+        message += f"Avg Hold Time: {insights['avg_hold_time_hours']:.1f} hours\n"
+        message += f"Risk/Reward Ratio: {insights['risk_reward_ratio']:.2f}\n"
+        
+        if insights.get('profit_distribution'):
+            message += f"\n<b>Profit Distribution:</b>\n"
+            for range_name, count in insights['profit_distribution'].items():
+                message += f"{range_name}: {count} trades\n"
+        
+        message += f"\n<i>Last updated: {insights.get('last_updated', 'N/A')}</i>"
+        
+        await update.message.reply_text(message, parse_mode='HTML')
+    
+    async def handle_volatility(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /volatility <symbol> command - Show volatility info and position sizing suggestion"""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+        
+        if not context.args or len(context.args) == 0:
+            await update.message.reply_text("❌ Usage: /volatility <symbol>\nExample: /volatility EURUSD")
+            return
+        
+        symbol = context.args[0]
+        
+        # Get volatility calculator from main service (will be set)
+        if not hasattr(self, 'volatility_calc') or not self.volatility_calc:
+            await update.message.reply_text("❌ Volatility calculator not available.")
+            return
+        
+        # Get account balance
+        if not self.mt5_monitor:
+            await update.message.reply_text("❌ MT5 monitor not available.")
+            return
+        
+        account_info = self.mt5_monitor.get_account_info()
+        if not account_info:
+            await update.message.reply_text("❌ Could not get account information.")
+            return
+        
+        account_balance = account_info.get('balance', 0)
+        
+        # Get volatility metrics
+        volatility = self.volatility_calc.calculate_volatility(symbol)
+        if not volatility:
+            await update.message.reply_text(f"❌ Could not calculate volatility for {symbol}")
+            return
+        
+        # Get position size suggestion
+        suggestion = self.volatility_calc.suggest_position_size(
+            symbol=symbol,
+            account_balance=account_balance
+        )
+        
+        message = f"📊 <b>Volatility Analysis: {symbol}</b>\n\n"
+        message += f"Current Price: {volatility['current_price']}\n"
+        message += f"Volatility Level: {volatility['volatility_level'].upper()}\n"
+        message += f"Std Deviation: {volatility['volatility_std']:.2f}%\n"
+        message += f"ATR: {volatility['atr']:.5f} ({volatility['atr_pct']:.2f}%)\n"
+        message += f"Avg Move: {volatility['avg_move_pct']:.2f}%\n"
+        message += f"Max Move: {volatility['max_move_pct']:.2f}%\n"
+        
+        if suggestion:
+            message += f"\n<b>Position Size Suggestion:</b>\n"
+            message += f"Suggested Volume: {suggestion['suggested_volume']}\n"
+            message += f"Risk Amount: {suggestion['risk_amount']:.2f}\n"
+            message += f"Actual Risk: {suggestion['actual_risk_pct']:.2f}%\n"
+            message += f"Adjustment: {suggestion['adjustment_factor']:.1f}x\n"
+            message += f"\n<i>{suggestion['reason']}</i>"
+        
+        await update.message.reply_text(message, parse_mode='HTML')
+    
     async def setup_commands(self):
         """Setup command handlers"""
         if not self.application:
@@ -1008,6 +1162,8 @@ class TelegramNotifier:
             self.application.add_handler(CommandHandler("note", self.handle_note))
             self.application.add_handler(CommandHandler("export", self.handle_export))
             self.application.add_handler(CommandHandler("history", self.handle_history))
+            self.application.add_handler(CommandHandler("mlinsights", self.handle_ml_insights))
+            self.application.add_handler(CommandHandler("volatility", self.handle_volatility))
             self.application.add_handler(CommandHandler("help", self.handle_help))
             self.application.add_handler(CommandHandler("start", self.handle_help))
             

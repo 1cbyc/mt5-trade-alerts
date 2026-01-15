@@ -86,6 +86,14 @@ class Config:
     TRADE_HISTORY_DB_PATH = os.getenv('TRADE_HISTORY_DB_PATH', 'trade_history.db')  # SQLite database path
     ENABLE_CHARTS = os.getenv('ENABLE_CHARTS', 'true').lower() == 'true'
     
+    # ML-based Profit Suggestions
+    ENABLE_ML_PROFIT_SUGGESTIONS = os.getenv('ENABLE_ML_PROFIT_SUGGESTIONS', 'true').lower() == 'true'
+    ML_MIN_TRADES_FOR_LEARNING = int(os.getenv('ML_MIN_TRADES_FOR_LEARNING', '10'))  # Minimum trades needed to learn patterns
+    
+    # Volatility-based Position Sizing
+    ENABLE_VOLATILITY_POSITION_SIZING = os.getenv('ENABLE_VOLATILITY_POSITION_SIZING', 'true').lower() == 'true'
+    VOLATILITY_PERIODS = int(os.getenv('VOLATILITY_PERIODS', '20'))  # Number of periods for volatility calculation
+    
     @staticmethod
     def load_price_levels() -> Dict[str, List[Dict]]:
         """Load price level configurations from JSON file"""
