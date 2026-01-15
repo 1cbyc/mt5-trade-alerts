@@ -234,6 +234,7 @@ class MT5Monitor:
         
         triggered = []
         current_price = (price_info['bid'] + price_info['ask']) / 2
+        current_time = datetime.now()
         
         for level in levels:
             level_price = level.get('price')
@@ -242,6 +243,19 @@ class MT5Monitor:
             
             if level_price is None:
                 continue
+            
+            # Check expiration date
+            expiration = level.get('expiration')
+            if expiration:
+                try:
+                    if isinstance(expiration, str):
+                        exp_time = datetime.fromisoformat(expiration)
+                    else:
+                        exp_time = datetime.fromtimestamp(expiration)
+                    if current_time > exp_time:
+                        continue  # Level has expired, skip it
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid expiration format for level {level_id}")
             
             triggered_flag = False
             if level_type == 'above' and current_price >= level_price:
@@ -258,10 +272,141 @@ class MT5Monitor:
                     'level_price': level_price,
                     'current_price': current_price,
                     'level_type': level_type,
-                    'time': price_info['time']
+                    'time': price_info['time'],
+                    'recurring': level.get('recurring', False),  # Default to one-time
+                    'group': level.get('group'),  # Group identifier
+                    'description': level.get('description', '')
                 })
         
         return triggered
+    
+    def detect_support_resistance(self, symbol: str, timeframe: int = mt5.TIMEFRAME_H1, 
+                                  periods: int = 100, min_touches: int = 2, 
+                                  tolerance_pct: float = 0.5) -> Dict[str, List[float]]:
+        """
+        Automatically detect support and resistance levels from historical price data
+        
+        Args:
+            symbol: Symbol to analyze
+            timeframe: MT5 timeframe (default: H1)
+            periods: Number of periods to analyze (default: 100)
+            min_touches: Minimum number of price touches to consider a level valid (default: 2)
+            tolerance_pct: Percentage tolerance for level detection (default: 0.5%)
+        
+        Returns:
+            Dictionary with 'support' and 'resistance' lists of price levels
+        """
+        if not self.connected:
+            return {'support': [], 'resistance': []}
+        
+        # Get historical data
+        rates = mt5.copy_rates_from(symbol, timeframe, 0, periods)
+        if rates is None or len(rates) == 0:
+            logger.warning(f"Could not retrieve historical data for {symbol}")
+            return {'support': [], 'resistance': []}
+        
+        # Extract high, low, close prices
+        highs = rates['high']
+        lows = rates['low']
+        closes = rates['close']
+        
+        # Find local maxima (resistance) and minima (support)
+        resistance_levels = []
+        support_levels = []
+        
+        # Use a simple approach: find pivot highs and lows
+        for i in range(2, len(rates) - 2):
+            # Check for resistance (local high)
+            if (highs[i] > highs[i-1] and highs[i] > highs[i-2] and 
+                highs[i] > highs[i+1] and highs[i] > highs[i+2]):
+                resistance_levels.append(float(highs[i]))
+            
+            # Check for support (local low)
+            if (lows[i] < lows[i-1] and lows[i] < lows[i-2] and 
+                lows[i] < lows[i+1] and lows[i] < lows[i+2]):
+                support_levels.append(float(lows[i]))
+        
+        # Group similar levels within tolerance
+        def group_levels(levels: List[float], tolerance_pct: float) -> List[float]:
+            if not levels:
+                return []
+            
+            levels = sorted(levels)
+            grouped = []
+            current_group = [levels[0]]
+            
+            for level in levels[1:]:
+                # Check if level is within tolerance of current group
+                avg_group = sum(current_group) / len(current_group)
+                tolerance = avg_group * (tolerance_pct / 100)
+                
+                if abs(level - avg_group) <= tolerance:
+                    current_group.append(level)
+                else:
+                    # Finalize current group if it has enough touches
+                    if len(current_group) >= min_touches:
+                        grouped.append(sum(current_group) / len(current_group))
+                    current_group = [level]
+            
+            # Add final group
+            if len(current_group) >= min_touches:
+                grouped.append(sum(current_group) / len(current_group))
+            
+            return grouped
+        
+        resistance = group_levels(resistance_levels, tolerance_pct)
+        support = group_levels(support_levels, tolerance_pct)
+        
+        return {
+            'support': sorted(support),
+            'resistance': sorted(resistance, reverse=True)
+        }
+    
+    def check_level_groups(self, symbol: str, levels: List[Dict], 
+                          triggered_levels: List[str]) -> List[Dict]:
+        """
+        Check if multiple levels in a group have been triggered
+        
+        Args:
+            symbol: Symbol being checked
+            levels: List of price levels
+            triggered_levels: List of level IDs that have been triggered
+        
+        Returns:
+            List of group alerts if group conditions are met
+        """
+        # Group levels by their group identifier
+        groups = {}
+        for level in levels:
+            group_id = level.get('group')
+            if group_id:
+                if group_id not in groups:
+                    groups[group_id] = {
+                        'levels': [],
+                        'required_count': level.get('group_required_count', 2),  # Default: 2 levels
+                        'description': level.get('group_description', f'Group {group_id}')
+                    }
+                groups[group_id]['levels'].append(level)
+        
+        group_alerts = []
+        for group_id, group_info in groups.items():
+            triggered_in_group = [
+                level for level in group_info['levels'] 
+                if level.get('id') in triggered_levels
+            ]
+            
+            if len(triggered_in_group) >= group_info['required_count']:
+                group_alerts.append({
+                    'symbol': symbol,
+                    'group_id': group_id,
+                    'description': group_info['description'],
+                    'triggered_count': len(triggered_in_group),
+                    'required_count': group_info['required_count'],
+                    'triggered_levels': [l.get('id') for l in triggered_in_group],
+                    'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                })
+        
+        return group_alerts
     
     def get_active_instruments(self) -> set:
         """Get all instruments with active positions or orders"""

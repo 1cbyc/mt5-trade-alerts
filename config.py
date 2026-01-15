@@ -51,6 +51,15 @@ class Config:
     DAILY_SUMMARY_HOUR = int(os.getenv('DAILY_SUMMARY_HOUR', '23'))  # Hour to send daily summary (24-hour format, default 23:00)
     DAILY_SUMMARY_MINUTE = int(os.getenv('DAILY_SUMMARY_MINUTE', '0'))  # Minute to send daily summary (default 0)
     
+    # Advanced Price Level Features
+    ENABLE_PRICE_LEVEL_GROUPS = os.getenv('ENABLE_PRICE_LEVEL_GROUPS', 'true').lower() == 'true'
+    ENABLE_DYNAMIC_LEVELS = os.getenv('ENABLE_DYNAMIC_LEVELS', 'false').lower() == 'true'
+    DYNAMIC_LEVELS_TIMEFRAME = int(os.getenv('DYNAMIC_LEVELS_TIMEFRAME', '16385'))  # MT5 TIMEFRAME_H1 = 16385
+    DYNAMIC_LEVELS_PERIODS = int(os.getenv('DYNAMIC_LEVELS_PERIODS', '100'))  # Number of periods to analyze
+    DYNAMIC_LEVELS_MIN_TOUCHES = int(os.getenv('DYNAMIC_LEVELS_MIN_TOUCHES', '2'))  # Minimum touches for valid level
+    DYNAMIC_LEVELS_TOLERANCE_PCT = float(os.getenv('DYNAMIC_LEVELS_TOLERANCE_PCT', '0.5'))  # Tolerance percentage
+    DYNAMIC_LEVELS_AUTO_UPDATE_HOURS = int(os.getenv('DYNAMIC_LEVELS_AUTO_UPDATE_HOURS', '24'))  # Auto-update interval in hours
+    
     @staticmethod
     def load_price_levels() -> Dict[str, List[Dict]]:
         """Load price level configurations from JSON file"""
