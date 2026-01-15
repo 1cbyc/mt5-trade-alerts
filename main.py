@@ -28,6 +28,8 @@ class MT5AlertService:
         self.triggered_levels = set()
         self.monitored_symbols = set()
         self.sent_profit_suggestions = set()  # Track sent suggestions to avoid spam
+        self.sent_risk_alerts = set()  # Track sent risk alerts to avoid spam
+        self.initial_balance = None  # Track initial balance for drawdown calculation
     
     async def initialize(self):
         """Initialize MT5 and Telegram connections"""
@@ -77,6 +79,12 @@ class MT5AlertService:
         # Initialize monitored symbols from config
         self.monitored_symbols = set(Config.MONITORED_SYMBOLS)
         logger.info(f"Monitoring synthetic indices: {', '.join(self.monitored_symbols)}")
+        
+        # Store initial balance for drawdown calculation
+        account_info = self.mt5_monitor.get_account_info()
+        if account_info:
+            self.initial_balance = account_info.get('balance', 0)
+            logger.info(f"Initial balance tracked: {self.initial_balance}")
         
         return True
     
@@ -172,6 +180,60 @@ class MT5AlertService:
                 await self.telegram.send_profit_suggestion(suggestion)
                 self.sent_profit_suggestions.add(suggestion_key)
     
+    async def check_risk_alerts(self):
+        """Check for risk management alerts"""
+        if not Config.ENABLE_RISK_ALERTS:
+            return
+        
+        # Check margin level
+        margin_alert = self.mt5_monitor.check_margin_level(
+            warning_threshold=Config.MARGIN_LEVEL_WARNING,
+            critical_threshold=Config.MARGIN_LEVEL_CRITICAL
+        )
+        if margin_alert:
+            alert_key = f"margin_{margin_alert['type']}_{margin_alert['margin_level']:.1f}"
+            if alert_key not in self.sent_risk_alerts:
+                logger.warning(f"Margin {margin_alert['type']} alert: {margin_alert['margin_level']:.2f}%")
+                await self.telegram.send_margin_alert(margin_alert)
+                self.sent_risk_alerts.add(alert_key)
+        
+        # Check position sizes
+        position_alerts = self.mt5_monitor.check_position_sizes(
+            max_size_pct=Config.MAX_POSITION_SIZE_PCT
+        )
+        for alert in position_alerts:
+            alert_key = f"position_size_{alert['ticket']}"
+            if alert_key not in self.sent_risk_alerts:
+                logger.warning(f"Position size warning: {alert['symbol']} - {alert['position_size_pct']:.2f}%")
+                await self.telegram.send_position_size_alert(alert)
+                self.sent_risk_alerts.add(alert_key)
+        
+        # Check daily loss limit
+        if Config.DAILY_LOSS_LIMIT_PCT > 0 or Config.DAILY_LOSS_LIMIT_AMOUNT > 0:
+            loss_alert = self.mt5_monitor.check_daily_loss_limit(
+                loss_limit_pct=Config.DAILY_LOSS_LIMIT_PCT,
+                loss_limit_amount=Config.DAILY_LOSS_LIMIT_AMOUNT
+            )
+            if loss_alert:
+                alert_key = f"daily_loss_{loss_alert['type']}"
+                if alert_key not in self.sent_risk_alerts:
+                    logger.warning(f"Daily loss limit alert: {loss_alert.get('loss_pct', loss_alert.get('daily_loss', 0))}")
+                    await self.telegram.send_daily_loss_alert(loss_alert)
+                    self.sent_risk_alerts.add(alert_key)
+        
+        # Check drawdown
+        if Config.DRAWDOWN_LIMIT_PCT > 0 and self.initial_balance:
+            drawdown_alert = self.mt5_monitor.check_drawdown(
+                drawdown_limit_pct=Config.DRAWDOWN_LIMIT_PCT,
+                initial_balance=self.initial_balance
+            )
+            if drawdown_alert:
+                alert_key = f"drawdown_{drawdown_alert['drawdown_pct']:.1f}"
+                if alert_key not in self.sent_risk_alerts:
+                    logger.warning(f"Drawdown alert: {drawdown_alert['drawdown_pct']:.2f}%")
+                    await self.telegram.send_drawdown_alert(drawdown_alert)
+                    self.sent_risk_alerts.add(alert_key)
+    
     async def run(self):
         """Main event loop"""
         if not await self.initialize():
@@ -207,6 +269,10 @@ class MT5AlertService:
                 # Check profit suggestions (every 3 cycles = ~15 seconds)
                 if check_counter % 3 == 0:
                     await self.check_profit_suggestions()
+                
+                # Check risk management alerts (every 10 cycles = ~50 seconds - less frequent due to heavy operations)
+                if check_counter % 10 == 0:
+                    await self.check_risk_alerts()
                 
                 # Wait before next check
                 await asyncio.sleep(Config.PRICE_CHECK_INTERVAL)
