@@ -177,17 +177,91 @@ class MT5Monitor:
         
         for ticket in closed_tickets:
             closed_pos = self.tracked_positions.pop(ticket)
-            new_positions.append({
+            
+            # Get detailed trade information from deal history
+            trade_details = self._get_trade_details_from_deals(ticket)
+            
+            position_data = {
                 'ticket': closed_pos['ticket'],
                 'symbol': closed_pos['symbol'],
                 'type': 'CLOSED',
                 'volume': closed_pos['volume'],
                 'price_open': closed_pos['price_open'],
                 'profit': closed_pos['profit'],
-                'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            })
+                'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'time_open': closed_pos.get('time'),
+                'time_close': datetime.now().isoformat(),
+                'price_close': trade_details.get('price_close'),
+                'commission': trade_details.get('commission', 0),
+                'swap': trade_details.get('swap', 0),
+                'sl': trade_details.get('sl'),
+                'tp': trade_details.get('tp'),
+                'duration_seconds': trade_details.get('duration_seconds')
+            }
+            
+            new_positions.append(position_data)
         
         return new_positions
+    
+    def _get_trade_details_from_deals(self, position_ticket: int) -> Dict:
+        """Get detailed trade information from deal history"""
+        if not self.connected:
+            return {}
+        
+        try:
+            # Get deals for this position (last 24 hours should be enough)
+            from datetime import timedelta
+            end_time = datetime.now()
+            start_time = end_time - timedelta(days=1)
+            start_timestamp = int(start_time.timestamp())
+            end_timestamp = int(end_time.timestamp())
+            
+            deals = mt5.history_deals_get(start_timestamp, end_timestamp)
+            if not deals:
+                return {}
+            
+            # Find entry and exit deals
+            entry_deal = None
+            exit_deal = None
+            total_commission = 0.0
+            total_swap = 0.0
+            sl = None
+            tp = None
+            
+            for deal in deals:
+                if deal.position_id == position_ticket:
+                    if deal.entry == mt5.DEAL_ENTRY_IN:
+                        entry_deal = deal
+                        sl = deal.sl if deal.sl > 0 else None
+                        tp = deal.tp if deal.tp > 0 else None
+                    elif deal.entry == mt5.DEAL_ENTRY_OUT:
+                        exit_deal = deal
+                    
+                    total_commission += deal.commission
+                    total_swap += deal.swap
+            
+            result = {
+                'commission': total_commission,
+                'swap': total_swap,
+                'sl': sl,
+                'tp': tp
+            }
+            
+            if entry_deal and exit_deal:
+                result['price_close'] = exit_deal.price
+                entry_time = datetime.fromtimestamp(entry_deal.time)
+                exit_time = datetime.fromtimestamp(exit_deal.time)
+                result['duration_seconds'] = int((exit_time - entry_time).total_seconds())
+                result['time_open'] = entry_time.isoformat()
+                result['time_close'] = exit_time.isoformat()
+            elif exit_deal:
+                result['price_close'] = exit_deal.price
+                result['time_close'] = datetime.fromtimestamp(exit_deal.time).isoformat()
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error getting trade details from deals: {e}")
+            return {}
     
     def get_new_orders(self) -> List[Dict]:
         """Get newly placed or modified orders since last check"""
@@ -1211,6 +1285,9 @@ class MT5Monitor:
             price = tick.ask  # Close sell position at ask
             order_type = mt5.ORDER_TYPE_BUY
         
+        # Get appropriate filling mode for the symbol
+        filling_mode = self._get_filling_mode(symbol)
+        
         # Create close request
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -1223,7 +1300,7 @@ class MT5Monitor:
             "magic": 234000,
             "comment": "Closed via Telegram",
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": filling_mode,
         }
         
         # Send order
@@ -1409,30 +1486,69 @@ class MT5Monitor:
             'tp': new_tp if new_tp > 0 else None
         }
     
+    def _get_filling_mode(self, symbol: str) -> int:
+        """
+        Get the appropriate filling mode for a symbol
+        
+        Args:
+            symbol: Trading symbol
+        
+        Returns:
+            Filling mode constant (ORDER_FILLING_FOK, ORDER_FILLING_IOC, or ORDER_FILLING_RETURN)
+        """
+        symbol_info = mt5.symbol_info(symbol)
+        if not symbol_info:
+            # Default to IOC if we can't get symbol info
+            return mt5.ORDER_FILLING_IOC
+        
+        # Get filling mode flags (bitmask)
+        filling_mode = getattr(symbol_info, 'filling_mode', 0)
+        
+        # MT5 filling_mode is a bitmask where:
+        # Bit 0 (1) = ORDER_FILLING_FOK supported
+        # Bit 1 (2) = ORDER_FILLING_IOC supported
+        # Bit 2 (4) = ORDER_FILLING_RETURN supported
+        
+        # Try FOK first (Fill or Kill - most restrictive, best for market orders)
+        if filling_mode & 1:  # Check bit 0
+            return mt5.ORDER_FILLING_FOK
+        
+        # Try IOC next (Immediate or Cancel - good for market orders)
+        if filling_mode & 2:  # Check bit 1
+            return mt5.ORDER_FILLING_IOC
+        
+        # Fall back to RETURN (Return - least restrictive)
+        if filling_mode & 4:  # Check bit 2
+            return mt5.ORDER_FILLING_RETURN
+        
+        # If no filling mode is set, default to IOC
+        # This should rarely happen, but provides a fallback
+        return mt5.ORDER_FILLING_IOC
+    
     def partial_close(self, ticket: int, volume: float) -> Dict:
         """
         Partially close a position
-        
+
         Args:
             ticket: Position ticket number
             volume: Volume to close (must be less than position volume)
-        
+
         Returns:
             Dictionary with success status and details
         """
         if not self.connected:
             return {'success': False, 'error': 'Not connected to MT5'}
-        
+
         if volume <= 0:
             return {'success': False, 'error': 'Volume must be greater than 0'}
-        
+
         # Get position information
         position = mt5.positions_get(ticket=ticket)
         if not position or len(position) == 0:
             return {'success': False, 'error': f'Position with ticket {ticket} not found'}
-        
+
         pos = position[0]
-        
+
         # Get symbol info for volume step
         symbol_info = mt5.symbol_info(pos.symbol)
         if symbol_info:
@@ -1457,12 +1573,12 @@ class MT5Monitor:
                     'success': False,
                     'error': f'Volume ({volume}) must be less than position volume ({pos.volume}). Use /close to close fully.'
                 }
-        
+
         # Get current price
         tick = mt5.symbol_info_tick(pos.symbol)
         if not tick:
             return {'success': False, 'error': f'Could not get current price for {pos.symbol}'}
-        
+
         # Determine close price based on position type
         if pos.type == mt5.ORDER_TYPE_BUY:
             price = tick.bid
@@ -1470,7 +1586,10 @@ class MT5Monitor:
         else:
             price = tick.ask
             order_type = mt5.ORDER_TYPE_BUY
-        
+
+        # Get appropriate filling mode for the symbol
+        filling_mode = self._get_filling_mode(pos.symbol)
+
         # Create partial close request
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -1483,9 +1602,9 @@ class MT5Monitor:
             "magic": 234000,
             "comment": f"Partial close {volume} lots",
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": filling_mode,
         }
-        
+
         # Send order
         result = mt5.order_send(request)
         

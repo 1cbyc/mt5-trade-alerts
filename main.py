@@ -8,6 +8,8 @@ from typing import Dict, List, Optional
 from mt5_monitor import MT5Monitor
 from telegram_bot import TelegramNotifier
 from config import Config
+from trade_history import TradeHistoryDB
+from chart_generator import ChartGenerator
 
 logging.basicConfig(
     level=logging.INFO,
@@ -177,6 +179,79 @@ class MT5AlertService:
         self.connection_health_checked = False
         self.last_connection_check = None
         self.connection_lost_alerted = False
+        
+        # Trade history database
+        self.trade_db = None
+        if Config.ENABLE_TRADE_HISTORY:
+            self.trade_db = TradeHistoryDB(db_path=Config.TRADE_HISTORY_DB_PATH)
+        
+        # Chart generator
+        self.chart_generator = ChartGenerator() if Config.ENABLE_CHARTS else None
+    
+    def _record_trade_to_db(self, trade: Dict):
+        """Record a closed trade to the database"""
+        if not self.trade_db:
+            return
+        
+        try:
+            # Convert time strings to datetime objects if needed
+            time_open = trade.get('time_open') or trade.get('time')
+            time_close = trade.get('time_close') or trade.get('time')
+            
+            # Handle different time formats
+            if isinstance(time_open, str):
+                try:
+                    time_open = datetime.fromisoformat(time_open.replace(' ', 'T'))
+                except:
+                    try:
+                        time_open = datetime.strptime(time_open, '%Y-%m-%d %H:%M:%S')
+                    except:
+                        time_open = datetime.now()
+            elif isinstance(time_open, (int, float)):
+                time_open = datetime.fromtimestamp(time_open)
+            elif not isinstance(time_open, datetime):
+                time_open = datetime.now()
+            
+            if isinstance(time_close, str):
+                try:
+                    time_close = datetime.fromisoformat(time_close.replace(' ', 'T'))
+                except:
+                    try:
+                        time_close = datetime.strptime(time_close, '%Y-%m-%d %H:%M:%S')
+                    except:
+                        time_close = datetime.now()
+            elif isinstance(time_close, (int, float)):
+                time_close = datetime.fromtimestamp(time_close)
+            elif not isinstance(time_close, datetime):
+                time_close = datetime.now()
+            
+            # Calculate duration if not provided
+            duration_seconds = trade.get('duration_seconds')
+            if not duration_seconds and time_open and time_close:
+                duration_seconds = int((time_close - time_open).total_seconds())
+            
+            # Prepare trade data for database
+            trade_data = {
+                'ticket': trade.get('ticket'),
+                'symbol': trade.get('symbol'),
+                'type': trade.get('type', 'BUY'),  # Default to BUY if not specified
+                'volume': trade.get('volume'),
+                'price_open': trade.get('price_open'),
+                'price_close': trade.get('price_close'),
+                'profit': trade.get('profit', 0),
+                'commission': trade.get('commission', 0),
+                'swap': trade.get('swap', 0),
+                'time_open': time_open.isoformat() if isinstance(time_open, datetime) else str(time_open),
+                'time_close': time_close.isoformat() if isinstance(time_close, datetime) else str(time_close),
+                'duration_seconds': duration_seconds,
+                'sl': trade.get('sl'),
+                'tp': trade.get('tp')
+            }
+            
+            self.trade_db.add_trade(trade_data)
+            logger.debug(f"Recorded trade {trade.get('ticket')} to database")
+        except Exception as e:
+            logger.error(f"Error recording trade to database: {e}")
     
     async def initialize(self):
         """Initialize MT5 and Telegram connections"""
@@ -208,6 +283,10 @@ class MT5AlertService:
         
         # Set MT5 monitor reference for command handlers
         self.telegram.set_mt5_monitor(self.mt5_monitor)
+        if self.trade_db:
+            self.telegram.set_trade_db(self.trade_db)
+        if self.chart_generator:
+            self.telegram.set_chart_generator(self.chart_generator)
         
         # Setup command handlers
         await self.telegram.setup_commands()
@@ -269,6 +348,10 @@ class MT5AlertService:
             logger.info(f"New trade detected: {trade.get('symbol')} - {trade.get('type')}")
             message = self.telegram.format_trade_alert(trade)
             await self._send_alert_safe(message, alert_type='trade', priority='important')
+            
+            # Record closed trades to database
+            if trade.get('type') == 'CLOSED' and self.trade_db:
+                self._record_trade_to_db(trade)
     
     async def check_orders(self):
         """Check for new orders and send alerts"""

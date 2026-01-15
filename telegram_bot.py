@@ -3,6 +3,9 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram.error import TelegramError
 import logging
 from typing import Optional, Callable
+from datetime import datetime, timedelta
+import io
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +18,8 @@ class TelegramNotifier:
         self.enabled = True
         self.application = None
         self.mt5_monitor = None  # Will be set by main service
+        self.trade_db = None  # Will be set by main service
+        self.chart_generator = None  # Will be set by main service
     
     async def send_message(self, message: str) -> bool:
         """Send a message to Telegram"""
@@ -246,6 +251,14 @@ class TelegramNotifier:
     def set_mt5_monitor(self, mt5_monitor):
         """Set the MT5Monitor instance for command handlers"""
         self.mt5_monitor = mt5_monitor
+    
+    def set_trade_db(self, trade_db):
+        """Set the TradeHistoryDB instance for command handlers"""
+        self.trade_db = trade_db
+    
+    def set_chart_generator(self, chart_generator):
+        """Set the ChartGenerator instance for command handlers"""
+        self.chart_generator = chart_generator
     
     def format_status(self, account_info: dict) -> str:
         """Format account status for /status command"""
@@ -494,6 +507,16 @@ class TelegramNotifier:
         message += "  Use 0 to remove SL/TP\n"
         message += "/partial &lt;ticket&gt; &lt;volume&gt; - Partially close position\n"
         message += "  Example: /partial 123456 0.5\n\n"
+        message += "<b>📊 Analytics Commands:</b>\n"
+        message += "/chart [type] [days] - Generate performance charts\n"
+        message += "  Types: summary, equity, daily, distribution\n"
+        message += "  Example: /chart summary 30\n"
+        message += "/history [days=X] [symbol=X] [limit=X] - View trade history\n"
+        message += "  Example: /history days=7 symbol=EURUSD limit=10\n"
+        message += "/note &lt;ticket&gt; &lt;note&gt; - Add note to a trade\n"
+        message += "  Example: /note 123456 Good entry point\n"
+        message += "/export [days=X] [symbol=X] - Export trades to CSV\n"
+        message += "  Example: /export days=30 symbol=EURUSD\n\n"
         message += "/help - Show this help message\n\n"
         message += "<b>🔔 Automatic Alerts:</b>\n"
         message += "• New trades (open/close)\n"
@@ -756,6 +779,217 @@ class TelegramNotifier:
         
         await update.message.reply_text(message, parse_mode='HTML')
     
+    async def handle_chart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /chart command - Generate and send performance charts"""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+        
+        if not self.trade_db or not self.chart_generator:
+            await update.message.reply_text("❌ Trade history or charts not available.")
+            return
+        
+        # Parse chart type (default: summary)
+        chart_type = 'summary'
+        if context.args and len(context.args) > 0:
+            chart_type = context.args[0].lower()
+        
+        # Parse period (default: 30 days)
+        days = 30
+        if context.args and len(context.args) > 1:
+            try:
+                days = int(context.args[1])
+            except ValueError:
+                pass
+        
+        start_date = datetime.now() - timedelta(days=days)
+        trades = self.trade_db.get_trades(start_date=start_date)
+        
+        if not trades:
+            await update.message.reply_text(f"❌ No trades found in the last {days} days.")
+            return
+        
+        try:
+            # Generate chart based on type
+            chart_bytes = None
+            chart_name = ""
+            
+            if chart_type == 'equity':
+                chart_bytes = self.chart_generator.generate_equity_curve(trades)
+                chart_name = "Equity Curve"
+            elif chart_type == 'daily':
+                chart_bytes = self.chart_generator.generate_daily_pnl_chart(trades)
+                chart_name = "Daily P/L"
+            elif chart_type == 'distribution':
+                chart_bytes = self.chart_generator.generate_win_loss_distribution(trades)
+                chart_name = "Win/Loss Distribution"
+            else:  # summary
+                chart_bytes = self.chart_generator.generate_performance_summary_chart(trades)
+                chart_name = "Performance Summary"
+            
+            if chart_bytes:
+                await update.message.reply_photo(
+                    photo=io.BytesIO(chart_bytes),
+                    caption=f"📊 <b>{chart_name}</b>\nPeriod: Last {days} days\nTrades: {len(trades)}",
+                    parse_mode='HTML'
+                )
+            else:
+                await update.message.reply_text("❌ Failed to generate chart.")
+        except Exception as e:
+            logger.error(f"Error generating chart: {e}")
+            await update.message.reply_text(f"❌ Error generating chart: {str(e)}")
+    
+    async def handle_note(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /note <ticket> <note> command - Add note to a trade"""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+        
+        if not self.trade_db:
+            await update.message.reply_text("❌ Trade history not available.")
+            return
+        
+        if not context.args or len(context.args) < 2:
+            await update.message.reply_text("❌ Usage: /note <ticket> <note text>\nExample: /note 123456 Good entry, followed trend")
+            return
+        
+        try:
+            ticket = int(context.args[0])
+            note = ' '.join(context.args[1:])
+            
+            if self.trade_db.add_trade_note(ticket, note):
+                trade = self.trade_db.get_trade(ticket)
+                if trade:
+                    message = f"✅ <b>Note Added</b>\n\n"
+                    message += f"Ticket: {ticket}\n"
+                    message += f"Symbol: {trade.get('symbol', 'N/A')}\n"
+                    message += f"Note: {note}"
+                else:
+                    message = f"✅ Note added to trade {ticket}\n\nNote: {note}"
+            else:
+                message = f"❌ Trade {ticket} not found in history."
+            
+            await update.message.reply_text(message, parse_mode='HTML')
+        except ValueError:
+            await update.message.reply_text("❌ Invalid ticket number.")
+        except Exception as e:
+            logger.error(f"Error adding note: {e}")
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+    
+    async def handle_export(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /export command - Export trade data to CSV"""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+        
+        if not self.trade_db:
+            await update.message.reply_text("❌ Trade history not available.")
+            return
+        
+        # Parse optional filters
+        days = None
+        symbol = None
+        
+        if context.args:
+            for arg in context.args:
+                if arg.startswith('days='):
+                    try:
+                        days = int(arg.split('=')[1])
+                    except ValueError:
+                        pass
+                elif arg.startswith('symbol='):
+                    symbol = arg.split('=')[1]
+        
+        start_date = None
+        if days:
+            start_date = datetime.now() - timedelta(days=days)
+        
+        # Generate CSV file
+        csv_path = f"trades_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        
+        if self.trade_db.export_to_csv(csv_path, start_date=start_date, symbol=symbol):
+            try:
+                with open(csv_path, 'rb') as f:
+                    filters = []
+                    if days:
+                        filters.append(f"Last {days} days")
+                    if symbol:
+                        filters.append(f"Symbol: {symbol}")
+                    filter_text = f"\nFilters: {', '.join(filters)}" if filters else ""
+                    
+                    await update.message.reply_document(
+                        document=f,
+                        caption=f"📊 <b>Trade History Export</b>{filter_text}",
+                        parse_mode='HTML'
+                    )
+                os.remove(csv_path)  # Clean up
+            except Exception as e:
+                logger.error(f"Error sending CSV: {e}")
+                await update.message.reply_text(f"❌ Error sending file: {str(e)}")
+        else:
+            await update.message.reply_text("❌ No trades found to export.")
+    
+    async def handle_history(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /history command - View trade history"""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+        
+        if not self.trade_db:
+            await update.message.reply_text("❌ Trade history not available.")
+            return
+        
+        # Parse optional filters
+        days = 7
+        symbol = None
+        limit = 20
+        
+        if context.args:
+            for arg in context.args:
+                if arg.startswith('days='):
+                    try:
+                        days = int(arg.split('=')[1])
+                    except ValueError:
+                        pass
+                elif arg.startswith('symbol='):
+                    symbol = arg.split('=')[1]
+                elif arg.startswith('limit='):
+                    try:
+                        limit = int(arg.split('=')[1])
+                    except ValueError:
+                        pass
+        
+        start_date = datetime.now() - timedelta(days=days)
+        trades = self.trade_db.get_trades(start_date=start_date, symbol=symbol, limit=limit)
+        
+        if not trades:
+            await update.message.reply_text(f"❌ No trades found in the last {days} days.")
+            return
+        
+        message = f"📊 <b>Trade History</b>\n\n"
+        message += f"Period: Last {days} days\n"
+        if symbol:
+            message += f"Symbol: {symbol}\n"
+        message += f"Total: {len(trades)} trades\n\n"
+        
+        total_profit = 0.0
+        for i, trade in enumerate(trades[:limit], 1):
+            profit = trade.get('profit', 0)
+            total_profit += profit
+            profit_emoji = "💰" if profit >= 0 else "📉"
+            
+            time_close = trade.get('time_close') or trade.get('time', 'N/A')
+            if isinstance(time_close, str) and len(time_close) > 10:
+                time_close = time_close[:10]  # Just date
+            
+            message += f"{i}. <b>{trade.get('symbol', 'N/A')}</b> {trade.get('type', 'N/A')}\n"
+            message += f"   Ticket: {trade.get('ticket')} | {profit_emoji} {profit:.2f}\n"
+            message += f"   {time_close}\n\n"
+        
+        message += f"<b>Total P/L: {total_profit:.2f}</b>"
+        
+        await update.message.reply_text(message, parse_mode='HTML')
+    
     async def setup_commands(self):
         """Setup command handlers"""
         if not self.application:
@@ -770,6 +1004,10 @@ class TelegramNotifier:
             self.application.add_handler(CommandHandler("closeall", self.handle_closeall))
             self.application.add_handler(CommandHandler("modify", self.handle_modify))
             self.application.add_handler(CommandHandler("partial", self.handle_partial))
+            self.application.add_handler(CommandHandler("chart", self.handle_chart))
+            self.application.add_handler(CommandHandler("note", self.handle_note))
+            self.application.add_handler(CommandHandler("export", self.handle_export))
+            self.application.add_handler(CommandHandler("history", self.handle_history))
             self.application.add_handler(CommandHandler("help", self.handle_help))
             self.application.add_handler(CommandHandler("start", self.handle_help))
             
