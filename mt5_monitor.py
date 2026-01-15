@@ -51,6 +51,43 @@ class MT5Monitor:
         self.connected = False
         logger.info("Disconnected from MT5")
     
+    def check_connection(self) -> bool:
+        """
+        Check if MT5 connection is still active
+        
+        Returns:
+            True if connected, False if disconnected
+        """
+        if not self.connected:
+            return False
+        
+        try:
+            # Try to get account info as a connection test
+            account_info = mt5.account_info()
+            if account_info is None:
+                # Connection lost
+                self.connected = False
+                logger.warning("MT5 connection lost - account_info returned None")
+                return False
+            return True
+        except Exception as e:
+            logger.error(f"Error checking MT5 connection: {e}")
+            self.connected = False
+            return False
+    
+    def reconnect(self) -> bool:
+        """
+        Attempt to reconnect to MT5
+        
+        Returns:
+            True if reconnection successful, False otherwise
+        """
+        logger.info("Attempting to reconnect to MT5...")
+        if self.connected:
+            self.disconnect()
+        
+        return self.connect()
+    
     def _update_tracked_items(self):
         """Update tracked positions and orders"""
         # Track open positions
