@@ -26,6 +26,7 @@ config.env
 # Exclude all markdown files except README.md
 *.md
 !README.md
+!todo.md
 
 # Setup scripts (not needed in repo)
 *.ps1
