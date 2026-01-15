@@ -60,6 +60,27 @@ class Config:
     DYNAMIC_LEVELS_TOLERANCE_PCT = float(os.getenv('DYNAMIC_LEVELS_TOLERANCE_PCT', '0.5'))  # Tolerance percentage
     DYNAMIC_LEVELS_AUTO_UPDATE_HOURS = int(os.getenv('DYNAMIC_LEVELS_AUTO_UPDATE_HOURS', '24'))  # Auto-update interval in hours
     
+    # Enhanced Monitoring
+    ENABLE_CONNECTION_HEALTH_MONITORING = os.getenv('ENABLE_CONNECTION_HEALTH_MONITORING', 'true').lower() == 'true'
+    CONNECTION_CHECK_INTERVAL = int(os.getenv('CONNECTION_CHECK_INTERVAL', '30'))  # Check connection every X seconds
+    
+    # Alert Rate Limiting
+    ENABLE_ALERT_RATE_LIMITING = os.getenv('ENABLE_ALERT_RATE_LIMITING', 'true').lower() == 'true'
+    MAX_ALERTS_PER_MINUTE = int(os.getenv('MAX_ALERTS_PER_MINUTE', '10'))  # Max alerts per minute
+    MAX_ALERTS_PER_HOUR = int(os.getenv('MAX_ALERTS_PER_HOUR', '100'))  # Max alerts per hour
+    
+    # Alert Grouping/Batching
+    ENABLE_ALERT_GROUPING = os.getenv('ENABLE_ALERT_GROUPING', 'true').lower() == 'true'
+    ALERT_BATCH_WINDOW_SECONDS = int(os.getenv('ALERT_BATCH_WINDOW_SECONDS', '30'))  # Batch alerts within X seconds
+    ALERT_BATCH_MAX_SIZE = int(os.getenv('ALERT_BATCH_MAX_SIZE', '10'))  # Max alerts per batch
+    
+    # Quiet Hours
+    QUIET_HOURS_ENABLED = os.getenv('QUIET_HOURS_ENABLED', 'false').lower() == 'true'
+    QUIET_HOURS_START_HOUR = int(os.getenv('QUIET_HOURS_START_HOUR', '22'))  # Start hour (24-hour format)
+    QUIET_HOURS_START_MINUTE = int(os.getenv('QUIET_HOURS_START_MINUTE', '0'))  # Start minute
+    QUIET_HOURS_END_HOUR = int(os.getenv('QUIET_HOURS_END_HOUR', '8'))  # End hour (24-hour format)
+    QUIET_HOURS_END_MINUTE = int(os.getenv('QUIET_HOURS_END_MINUTE', '0'))  # End minute
+    
     @staticmethod
     def load_price_levels() -> Dict[str, List[Dict]]:
         """Load price level configurations from JSON file"""

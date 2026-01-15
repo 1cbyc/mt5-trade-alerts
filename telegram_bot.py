@@ -658,24 +658,45 @@ class TelegramNotifier:
             return
         
         if not context.args or len(context.args) < 1:
-            await update.message.reply_text("❌ Usage: /modify <ticket> [sl] [tp]\nExample: /modify 123456 1.1000 1.1100\nUse 0 to remove SL/TP")
+            await update.message.reply_text("❌ Usage: /modify <ticket> [sl] [tp]\n\nExamples:\n/modify 123456 1.1000 1.1100 - Set SL and TP\n/modify 123456 0 - Remove SL (keep TP)\n/modify 123456 1.1000 0 - Set SL, remove TP\n/modify 123456 0 0 - Remove both SL and TP")
             return
         
         try:
             ticket = int(context.args[0])
-            sl = float(context.args[1]) if len(context.args) > 1 and context.args[1].lower() != 'none' else None
-            tp = float(context.args[2]) if len(context.args) > 2 and context.args[2].lower() != 'none' else None
+            # Parse SL - use special value -1 to indicate "remove" (0 means remove, None means keep current)
+            if len(context.args) > 1:
+                if context.args[1].lower() in ['none', 'remove', 'delete']:
+                    sl = -1  # Special value to indicate removal
+                elif context.args[1].lower() == 'keep':
+                    sl = None  # Keep current
+                else:
+                    sl = float(context.args[1])
+                    if sl == 0:
+                        sl = -1  # 0 means remove
+            else:
+                sl = None  # Not provided, keep current
             
-            # Convert 0 to None (remove SL/TP)
-            if sl == 0:
-                sl = None
-            if tp == 0:
-                tp = None
+            # Parse TP - use special value -1 to indicate "remove"
+            if len(context.args) > 2:
+                if context.args[2].lower() in ['none', 'remove', 'delete']:
+                    tp = -1  # Special value to indicate removal
+                elif context.args[2].lower() == 'keep':
+                    tp = None  # Keep current
+                else:
+                    tp = float(context.args[2])
+                    if tp == 0:
+                        tp = -1  # 0 means remove
+            else:
+                tp = None  # Not provided, keep current
         except (ValueError, IndexError):
-            await update.message.reply_text("❌ Invalid arguments. Usage: /modify <ticket> [sl] [tp]\nExample: /modify 123456 1.1000 1.1100")
+            await update.message.reply_text("❌ Invalid arguments. Usage: /modify <ticket> [sl] [tp]\nExample: /modify 123456 1.1000 1.1100\nUse 0 to remove SL/TP")
             return
         
-        result = self.mt5_monitor.modify_position(ticket, sl=sl, tp=tp)
+        # Convert -1 back to 0 for the modify_position method (which treats 0 as remove)
+        sl_to_send = 0.0 if sl == -1 else sl
+        tp_to_send = 0.0 if tp == -1 else tp
+        
+        result = self.mt5_monitor.modify_position(ticket, sl=sl_to_send, tp=tp_to_send)
         
         if result.get('success'):
             message = f"✅ <b>Position Modified</b>\n\n"

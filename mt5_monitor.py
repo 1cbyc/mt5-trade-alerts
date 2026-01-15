@@ -51,6 +51,52 @@ class MT5Monitor:
         self.connected = False
         logger.info("Disconnected from MT5")
     
+    def check_connection(self) -> bool:
+        """
+        Check if MT5 connection is still active
+        
+        Returns:
+            True if connected, False if disconnected
+        """
+        if not self.connected:
+            return False
+        
+        try:
+            # Try to get account info as a connection test
+            account_info = mt5.account_info()
+            if account_info is None:
+                # Connection lost
+                self.connected = False
+                logger.warning("MT5 connection lost - account_info returned None")
+                return False
+            return True
+        except Exception as e:
+            logger.error(f"Error checking MT5 connection: {e}")
+            self.connected = False
+            return False
+    
+    def reconnect(self) -> bool:
+        """
+        Attempt to reconnect to MT5
+        
+        Returns:
+            True if reconnection successful, False otherwise
+        """
+        logger.info("Attempting to reconnect to MT5...")
+        # Always call disconnect to ensure clean MT5 library state
+        # Even if self.connected is False, we need to ensure mt5.shutdown() is called
+        # in case the connection was lost but cleanup wasn't performed
+        if self.connected:
+            self.disconnect()
+        else:
+            # Connection was lost but disconnect() wasn't called, ensure cleanup
+            try:
+                mt5.shutdown()
+            except:
+                pass  # Ignore errors if already shut down
+        
+        return self.connect()
+    
     def _update_tracked_items(self):
         """Update tracked positions and orders"""
         # Track open positions
@@ -1183,6 +1229,12 @@ class MT5Monitor:
         # Send order
         result = mt5.order_send(request)
         
+        if result is None:
+            return {
+                'success': False,
+                'error': f'Failed to close position: order_send returned None (last_error={mt5.last_error()})'
+            }
+        
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             return {
                 'success': False,
@@ -1248,8 +1300,8 @@ class MT5Monitor:
         
         Args:
             ticket: Position ticket number
-            sl: New stop loss price (None to keep current)
-            tp: New take profit price (None to keep current)
+            sl: New stop loss price (None to keep current, -1 or 0 to remove)
+            tp: New take profit price (None to keep current, -1 or 0 to remove)
         
         Returns:
             Dictionary with success status and details
@@ -1263,20 +1315,44 @@ class MT5Monitor:
             return {'success': False, 'error': f'Position with ticket {ticket} not found'}
         
         pos = position[0]
+        current_sl = pos.sl if pos.sl > 0 else 0.0
+        current_tp = pos.tp if pos.tp > 0 else 0.0
         
-        # Use current SL/TP if not provided
-        new_sl = sl if sl is not None else pos.sl
-        new_tp = tp if tp is not None else pos.tp
+        # Determine new SL/TP values
+        # -1 or 0 means remove (set to 0.0)
+        # None means keep current
+        # Any positive value means set to that value
+        if sl is not None:
+            if sl == -1 or sl == 0:
+                new_sl = 0.0  # Remove SL
+            else:
+                new_sl = float(sl)
+        else:
+            new_sl = current_sl  # Keep current
         
-        # Validate prices
+        if tp is not None:
+            if tp == -1 or tp == 0:
+                new_tp = 0.0  # Remove TP
+            else:
+                new_tp = float(tp)
+        else:
+            new_tp = current_tp  # Keep current
+        
+        # Check if there are any changes
+        if abs(new_sl - current_sl) < 0.00001 and abs(new_tp - current_tp) < 0.00001:
+            return {
+                'success': False,
+                'error': 'No changes detected. SL and TP are already set to the requested values.'
+            }
+        
+        # Validate prices only if setting new values (not removing)
         symbol_info = mt5.symbol_info(pos.symbol)
         if not symbol_info:
             return {'success': False, 'error': f'Could not get symbol info for {pos.symbol}'}
         
-        point = symbol_info.point
         current_price = pos.price_current
         
-        # Check if SL/TP are valid (must be appropriate distance from current price)
+        # Validate SL if setting a new value
         if new_sl > 0:
             if pos.type == mt5.ORDER_TYPE_BUY:
                 if new_sl >= current_price:
@@ -1285,6 +1361,7 @@ class MT5Monitor:
                 if new_sl <= current_price:
                     return {'success': False, 'error': 'Stop loss must be above current price for SELL position'}
         
+        # Validate TP if setting a new value
         if new_tp > 0:
             if pos.type == mt5.ORDER_TYPE_BUY:
                 if new_tp <= current_price:
@@ -1298,14 +1375,26 @@ class MT5Monitor:
             "action": mt5.TRADE_ACTION_SLTP,
             "symbol": pos.symbol,
             "position": ticket,
-            "sl": new_sl if new_sl > 0 else 0.0,
-            "tp": new_tp if new_tp > 0 else 0.0,
+            "sl": new_sl,
+            "tp": new_tp,
         }
         
         # Send order
         result = mt5.order_send(request)
         
+        if result is None:
+            return {
+                'success': False,
+                'error': f'Failed to modify position: order_send returned None (last_error={mt5.last_error()})'
+            }
+        
         if result.retcode != mt5.TRADE_RETCODE_DONE:
+            # Handle "No changes" error more gracefully
+            if "no changes" in result.comment.lower() or result.retcode == 10004:
+                return {
+                    'success': False,
+                    'error': 'No changes detected. The SL/TP values are already set as requested.'
+                }
             return {
                 'success': False,
                 'error': f'Failed to modify position: {result.comment}',
@@ -1344,18 +1433,30 @@ class MT5Monitor:
         
         pos = position[0]
         
-        if volume >= pos.volume:
-            return {
-                'success': False,
-                'error': f'Volume ({volume}) must be less than position volume ({pos.volume}). Use /close to close fully.'
-            }
-        
         # Get symbol info for volume step
         symbol_info = mt5.symbol_info(pos.symbol)
         if symbol_info:
-            volume_step = symbol_info.volume_step
+            volume_step = getattr(symbol_info, 'volume_step', None)
+            # Validate volume_step
+            if not volume_step or volume_step <= 0:
+                return {'success': False, 'error': f'Invalid volume_step for {pos.symbol}'}
             # Round volume to nearest step
             volume = round(volume / volume_step) * volume_step
+            # Re-validate after rounding
+            if volume <= 0:
+                return {'success': False, 'error': f'Volume too small (rounded to 0 based on volume step {volume_step})'}
+            if volume >= pos.volume:
+                return {
+                    'success': False,
+                    'error': f'Rounded volume ({volume}) must be less than position volume ({pos.volume}). Use /close to close fully.'
+                }
+        else:
+            # If no symbol_info, validate before proceeding
+            if volume >= pos.volume:
+                return {
+                    'success': False,
+                    'error': f'Volume ({volume}) must be less than position volume ({pos.volume}). Use /close to close fully.'
+                }
         
         # Get current price
         tick = mt5.symbol_info_tick(pos.symbol)
@@ -1387,6 +1488,12 @@ class MT5Monitor:
         
         # Send order
         result = mt5.order_send(request)
+        
+        if result is None:
+            return {
+                'success': False,
+                'error': f'Failed to partially close position: order_send returned None (last_error={mt5.last_error()})'
+            }
         
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             return {
