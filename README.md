@@ -420,6 +420,22 @@ All activity is logged to:
 - Don't share your Telegram bot token
 - Use environment variables or secure vaults for production deployments
 
+
+## New Structure
+
+mt5-trade-alerts/
+├── main.py (48 lines - entry point)
+├── src/
+│   ├── core/alert_management.py
+│   ├── services/alert_service.py (950 lines)
+│   ├── notifiers/ (5 files)
+│   ├── analytics/ (4 files)
+│   ├── monitoring/mt5_monitor.py
+│   └── utils/ (2 files)
+├── data/ (databases, JSON, CSV)
+├── scripts/ (utility scripts)
+└── screenshots/ (demo images)
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

@@ -5,7 +5,7 @@ import logging
 import aiohttp
 import json
 from typing import Optional, Dict, Any
-from notification_manager import AlertPriority
+from .notification_manager import AlertPriority
 
 logger = logging.getLogger(__name__)
 

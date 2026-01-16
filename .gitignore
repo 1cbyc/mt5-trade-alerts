@@ -16,6 +16,15 @@ config.env
 # User-specific configuration (if users want to keep their own price levels private)
 # price_levels.json
 
+# Data files
+data/*.db
+data/*.csv
+data/*.json
+!data/.gitkeep
+
+# Screenshots (optional - uncomment if you don't want to commit screenshots)
+# screenshots/
+
 # IDE
 .vscode/
 .idea/

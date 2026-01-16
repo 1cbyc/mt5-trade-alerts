@@ -4,7 +4,7 @@ Discord Notifier - Send notifications to Discord webhooks
 import logging
 import aiohttp
 from typing import Optional
-from notification_manager import AlertPriority
+from .notification_manager import AlertPriority
 
 logger = logging.getLogger(__name__)
 

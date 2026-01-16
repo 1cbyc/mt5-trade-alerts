@@ -84,7 +84,7 @@ class Config:
     
     # Trade History & Analytics
     ENABLE_TRADE_HISTORY = os.getenv('ENABLE_TRADE_HISTORY', 'true').lower() == 'true'
-    TRADE_HISTORY_DB_PATH = os.getenv('TRADE_HISTORY_DB_PATH', 'trade_history.db')  # SQLite database path
+    TRADE_HISTORY_DB_PATH = os.getenv('TRADE_HISTORY_DB_PATH', 'data/trade_history.db')  # SQLite database path
     ENABLE_CHARTS = os.getenv('ENABLE_CHARTS', 'true').lower() == 'true'
     
     # ML-based Profit Suggestions
@@ -120,20 +120,24 @@ class Config:
     @staticmethod
     def load_price_levels() -> Dict[str, List[Dict]]:
         """Load price level configurations from JSON file"""
-        if os.path.exists('price_levels.json'):
-            try:
-                with open('price_levels.json', 'r') as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"Error loading price_levels.json: {e}")
-                return {}
+        # Try data folder first, then root for backward compatibility
+        paths = ['data/price_levels.json', 'price_levels.json']
+        for path in paths:
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r') as f:
+                        return json.load(f)
+                except Exception as e:
+                    print(f"Error loading {path}: {e}")
         return {}
     
     @staticmethod
     def save_price_levels(levels: Dict[str, List[Dict]]):
         """Save price level configurations to JSON file"""
+        # Save to data folder, create if it doesn't exist
+        os.makedirs('data', exist_ok=True)
         try:
-            with open('price_levels.json', 'w') as f:
+            with open('data/price_levels.json', 'w') as f:
                 json.dump(levels, f, indent=2)
         except Exception as e:
             print(f"Error saving price_levels.json: {e}")

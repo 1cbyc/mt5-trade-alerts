@@ -5,8 +5,8 @@ import os
 import sys
 import io
 from datetime import datetime, timedelta
-from trade_history import TradeHistoryDB
-from chart_generator import ChartGenerator
+from src.analytics.trade_history import TradeHistoryDB
+from src.analytics.chart_generator import ChartGenerator
 
 # Fix Windows console encoding for emojis
 if sys.platform == 'win32':
