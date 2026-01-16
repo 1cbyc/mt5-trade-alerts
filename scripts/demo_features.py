@@ -5,8 +5,12 @@ import os
 import sys
 import io
 from datetime import datetime, timedelta
-from trade_history import TradeHistoryDB
-from chart_generator import ChartGenerator
+import sys
+import os
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.analytics.trade_history import TradeHistoryDB
+from src.analytics.chart_generator import ChartGenerator
 
 # Fix Windows console encoding for emojis
 if sys.platform == 'win32':
