@@ -10,14 +10,23 @@ from ..core.alert_management import AlertRateLimiter, AlertGrouper, QuietHours
 from ..monitoring.mt5_monitor import MT5Monitor
 from ..notifiers.telegram_bot import TelegramNotifier
 from ..notifiers.notification_manager import NotificationManager, AlertPriority
-from ..notifiers.discord_notifier import DiscordNotifier
 from ..notifiers.email_notifier import EmailNotifier
-from ..notifiers.webhook_notifier import WebhookNotifier
 from ..analytics.trade_history import TradeHistoryDB
 from ..analytics.chart_generator import ChartGenerator
 from ..analytics.ml_profit_analyzer import MLProfitAnalyzer
 from ..analytics.volatility_calculator import VolatilityCalculator
 from ..utils.config import Config
+
+# Optional imports for Discord and Webhook (require aiohttp)
+try:
+    from ..notifiers.discord_notifier import DiscordNotifier
+except ImportError:
+    DiscordNotifier = None
+
+try:
+    from ..notifiers.webhook_notifier import WebhookNotifier
+except ImportError:
+    WebhookNotifier = None
 
 logger = logging.getLogger(__name__)
 
@@ -208,13 +217,16 @@ class MT5AlertService:
         
         # Register Discord channel if enabled
         if Config.ENABLE_DISCORD_NOTIFICATIONS and Config.DISCORD_WEBHOOK_URL:
-            try:
-                discord_notifier = DiscordNotifier(Config.DISCORD_WEBHOOK_URL)
-                self.notification_manager.register_channel('discord', discord_notifier)
-                self.notification_manager.enable_channel('discord')
-                logger.info("Discord notifications enabled")
-            except Exception as e:
-                logger.error(f"Failed to initialize Discord notifier: {e}")
+            if DiscordNotifier is None:
+                logger.warning("Discord notifier not available (aiohttp not installed). Install with: pip install aiohttp")
+            else:
+                try:
+                    discord_notifier = DiscordNotifier(Config.DISCORD_WEBHOOK_URL)
+                    self.notification_manager.register_channel('discord', discord_notifier)
+                    self.notification_manager.enable_channel('discord')
+                    logger.info("Discord notifications enabled")
+                except Exception as e:
+                    logger.error(f"Failed to initialize Discord notifier: {e}")
         
         # Register Email channel if enabled
         if (Config.ENABLE_EMAIL_NOTIFICATIONS and Config.EMAIL_SMTP_SERVER and 
@@ -236,20 +248,23 @@ class MT5AlertService:
         
         # Register Webhook channel if enabled
         if Config.ENABLE_WEBHOOK_NOTIFICATIONS and Config.WEBHOOK_URL:
-            try:
-                import json
-                headers = {}
-                if Config.WEBHOOK_HEADERS:
-                    try:
-                        headers = json.loads(Config.WEBHOOK_HEADERS)
-                    except:
-                        pass
-                webhook_notifier = WebhookNotifier(Config.WEBHOOK_URL, headers=headers)
-                self.notification_manager.register_channel('webhook', webhook_notifier)
-                self.notification_manager.enable_channel('webhook')
-                logger.info("Webhook notifications enabled")
-            except Exception as e:
-                logger.error(f"Failed to initialize Webhook notifier: {e}")
+            if WebhookNotifier is None:
+                logger.warning("Webhook notifier not available (aiohttp not installed). Install with: pip install aiohttp")
+            else:
+                try:
+                    import json
+                    headers = {}
+                    if Config.WEBHOOK_HEADERS:
+                        try:
+                            headers = json.loads(Config.WEBHOOK_HEADERS)
+                        except:
+                            pass
+                    webhook_notifier = WebhookNotifier(Config.WEBHOOK_URL, headers=headers)
+                    self.notification_manager.register_channel('webhook', webhook_notifier)
+                    self.notification_manager.enable_channel('webhook')
+                    logger.info("Webhook notifications enabled")
+                except Exception as e:
+                    logger.error(f"Failed to initialize Webhook notifier: {e}")
         
         # Load price levels
         self.price_levels = Config.load_price_levels()
