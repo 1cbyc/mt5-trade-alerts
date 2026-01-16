@@ -69,9 +69,12 @@ class TelegramNotifier:
                 formatted_message = f"<b>{title}</b>\n\n{formatted_message}"
             
             if image_data:
+                photo = io.BytesIO(image_data)
+                if image_filename:
+                    photo.name = image_filename
                 await self.bot.send_photo(
                     chat_id=self.chat_id,
-                    photo=io.BytesIO(image_data),
+                    photo=photo,
                     caption=formatted_message,
                     parse_mode='HTML'
                 )

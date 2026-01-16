@@ -84,12 +84,17 @@ class EmailNotifier:
     
     def _send_email_sync(self, msg):
         """Synchronous email sending (runs in executor)"""
-        server = smtplib.SMTP(self.smtp_server, self.smtp_port)
-        if self.use_tls:
-            server.starttls()
-        server.login(self.sender_email, self.sender_password)
-        server.send_message(msg, to_addrs=self.recipient_emails)
-        server.quit()
+        try:
+            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+            if self.use_tls:
+                server.starttls()
+            server.login(self.sender_email, self.sender_password)
+            server.send_message(msg, to_addrs=self.recipient_emails)
+        finally:
+            try:
+                server.quit()
+            except:
+                pass
     
     async def send_message_with_image(
         self,
