@@ -6,7 +6,7 @@ from typing import Optional, Callable
 from datetime import datetime, timedelta
 import io
 import os
-from notification_manager import AlertPriority
+from .notification_manager import AlertPriority
 
 logger = logging.getLogger(__name__)
 
