@@ -5,7 +5,7 @@ Utility script to manage price levels interactively
 import json
 import sys
 from datetime import datetime, timedelta
-from config import Config
+from .config import Config
 
 
 def load_levels():
@@ -174,8 +174,8 @@ def remove_level(levels):
 def detect_levels(levels):
     """Auto-detect support/resistance levels for a symbol"""
     try:
-        from mt5_monitor import MT5Monitor
-        from config import Config
+        from ..monitoring.mt5_monitor import MT5Monitor
+        from .config import Config
         
         print("\n=== Auto-Detect Support/Resistance Levels ===")
         symbol = input("Enter symbol to analyze: ").upper().strip()
