@@ -12,8 +12,10 @@ from trade_history import TradeHistoryDB
 from chart_generator import ChartGenerator
 from ml_profit_analyzer import MLProfitAnalyzer
 from volatility_calculator import VolatilityCalculator
-from ml_profit_analyzer import MLProfitAnalyzer
-from volatility_calculator import VolatilityCalculator
+from notification_manager import NotificationManager, AlertPriority
+from discord_notifier import DiscordNotifier
+from email_notifier import EmailNotifier
+from webhook_notifier import WebhookNotifier
 
 logging.basicConfig(
     level=logging.INFO,
@@ -210,6 +212,9 @@ class MT5AlertService:
         self.volatility_calc = None
         if Config.ENABLE_VOLATILITY_POSITION_SIZING:
             self.volatility_calc = VolatilityCalculator(periods=Config.VOLATILITY_PERIODS)
+        
+        # Notification Manager (will be initialized after telegram is set)
+        self.notification_manager = None
     
     def _record_trade_to_db(self, trade: Dict):
         """Record a closed trade to the database"""
@@ -324,6 +329,57 @@ class MT5AlertService:
         else:
             logger.warning("Telegram bot connection test failed, but continuing...")
         
+        # Initialize Notification Manager
+        self.notification_manager = NotificationManager()
+        
+        # Register Telegram channel (always enabled)
+        self.notification_manager.register_channel('telegram', self.telegram)
+        self.notification_manager.enable_channel('telegram')
+        
+        # Register Discord channel if enabled
+        if Config.ENABLE_DISCORD_NOTIFICATIONS and Config.DISCORD_WEBHOOK_URL:
+            try:
+                discord_notifier = DiscordNotifier(Config.DISCORD_WEBHOOK_URL)
+                self.notification_manager.register_channel('discord', discord_notifier)
+                self.notification_manager.enable_channel('discord')
+                logger.info("Discord notifications enabled")
+            except Exception as e:
+                logger.error(f"Failed to initialize Discord notifier: {e}")
+        
+        # Register Email channel if enabled
+        if Config.ENABLE_EMAIL_NOTIFICATIONS and Config.EMAIL_SENDER and Config.EMAIL_RECIPIENTS:
+            try:
+                email_notifier = EmailNotifier(
+                    smtp_server=Config.EMAIL_SMTP_SERVER,
+                    smtp_port=Config.EMAIL_SMTP_PORT,
+                    sender_email=Config.EMAIL_SENDER,
+                    sender_password=Config.EMAIL_SENDER_PASSWORD,
+                    recipient_emails=Config.EMAIL_RECIPIENTS,
+                    use_tls=Config.EMAIL_USE_TLS
+                )
+                self.notification_manager.register_channel('email', email_notifier)
+                self.notification_manager.enable_channel('email')
+                logger.info("Email notifications enabled")
+            except Exception as e:
+                logger.error(f"Failed to initialize Email notifier: {e}")
+        
+        # Register Webhook channel if enabled
+        if Config.ENABLE_WEBHOOK_NOTIFICATIONS and Config.WEBHOOK_URL:
+            try:
+                import json
+                headers = {}
+                if Config.WEBHOOK_HEADERS:
+                    try:
+                        headers = json.loads(Config.WEBHOOK_HEADERS)
+                    except:
+                        pass
+                webhook_notifier = WebhookNotifier(Config.WEBHOOK_URL, headers=headers)
+                self.notification_manager.register_channel('webhook', webhook_notifier)
+                self.notification_manager.enable_channel('webhook')
+                logger.info("Webhook notifications enabled")
+            except Exception as e:
+                logger.error(f"Failed to initialize Webhook notifier: {e}")
+        
         # Load price levels
         self.price_levels = Config.load_price_levels()
         if self.price_levels:
@@ -409,7 +465,27 @@ class MT5AlertService:
                 
                 logger.info(f"Price level reached: {symbol} - {alert['level_id']} at {alert['current_price']}")
                 message = self.telegram.format_price_alert(alert)
-                await self._send_alert_safe(message, alert_type='price_level', priority='normal')
+                
+                # Generate price chart if enabled
+                image_data = None
+                if Config.ENABLE_PRICE_CHARTS_IN_ALERTS and self.chart_generator:
+                    try:
+                        image_data = self.chart_generator.generate_price_chart(
+                            symbol=symbol,
+                            highlight_price=alert.get('level_price'),
+                            highlight_label=f"Level: {alert.get('level_id', 'N/A')}"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to generate price chart for {symbol}: {e}")
+                
+                await self._send_alert_safe(
+                    message=message,
+                    alert_type='price_level',
+                    priority='normal',
+                    title=f"Price Level Alert: {symbol}",
+                    image_data=image_data,
+                    image_filename=f"{symbol}_price_chart.png"
+                )
                 
                 # Only add to triggered set if it's a one-time alert
                 if not is_recurring:
@@ -670,8 +746,16 @@ class MT5AlertService:
         
         await self._send_alert_safe(message, priority='critical')
     
-    async def _send_alert_safe(self, message: str, alert_type: str = 'general', 
-                               priority: str = 'normal', use_grouping: bool = True) -> bool:
+    async def _send_alert_safe(
+        self,
+        message: str,
+        alert_type: str = 'general',
+        priority: str = 'normal',
+        use_grouping: bool = True,
+        title: Optional[str] = None,
+        image_data: Optional[bytes] = None,
+        image_filename: Optional[str] = None
+    ) -> bool:
         """
         Send an alert with rate limiting, quiet hours, and optional grouping
         
@@ -680,10 +764,21 @@ class MT5AlertService:
             alert_type: Type of alert for grouping (e.g., 'trade', 'price_level', 'risk')
             priority: Alert priority ('critical', 'important', 'normal')
             use_grouping: Whether to use alert grouping
+            title: Optional title for the alert
+            image_data: Optional image bytes to attach
+            image_filename: Optional filename for the image
         
         Returns:
             True if alert was sent, False otherwise
         """
+        # Convert priority string to enum
+        priority_map = {
+            'critical': AlertPriority.CRITICAL,
+            'important': AlertPriority.IMPORTANT,
+            'normal': AlertPriority.NORMAL
+        }
+        alert_priority = priority_map.get(priority, AlertPriority.NORMAL)
+        
         # Check quiet hours
         if self.quiet_hours.should_suppress_alert(priority):
             logger.debug(f"Alert suppressed due to quiet hours: {alert_type}")
@@ -695,8 +790,8 @@ class MT5AlertService:
                 logger.warning(f"Alert rate limit exceeded, dropping alert: {alert_type}")
                 return False
         
-        # Handle grouping
-        if Config.ENABLE_ALERT_GROUPING and use_grouping and priority != 'critical':
+        # Handle grouping (only for text-only, non-critical alerts)
+        if Config.ENABLE_ALERT_GROUPING and use_grouping and priority != 'critical' and not image_data:
             should_send_batch = self.alert_grouper.add_alert(alert_type, {'message': message})
             
             if should_send_batch:
@@ -705,12 +800,32 @@ class MT5AlertService:
                 if len(batch) > 1:
                     # Multiple alerts - send as batch
                     batch_message = self._format_batch_alert(alert_type, batch)
-                    if await self.telegram.send_message(batch_message):
+                    if self.notification_manager:
+                        results = await self.notification_manager.send_notification(
+                            message=batch_message,
+                            priority=alert_priority,
+                            title=title
+                        )
+                        if any(results.values()):
+                            self.rate_limiter.record_alert()
+                            return True
+                    elif await self.telegram.send_message(batch_message, alert_priority):
                         self.rate_limiter.record_alert()
                         return True
                 else:
                     # Single alert - send normally
-                    if await self.telegram.send_message(message):
+                    if self.notification_manager:
+                        results = await self.notification_manager.send_notification(
+                            message=message,
+                            priority=alert_priority,
+                            title=title,
+                            image_data=image_data,
+                            image_filename=image_filename
+                        )
+                        if any(results.values()):
+                            self.rate_limiter.record_alert()
+                            return True
+                    elif await self.telegram.send_message(message, alert_priority):
                         self.rate_limiter.record_alert()
                         return True
             else:
@@ -718,8 +833,19 @@ class MT5AlertService:
                 logger.debug(f"Alert queued for batching: {alert_type}")
                 return True
         else:
-            # Send immediately (critical alerts or grouping disabled)
-            if await self.telegram.send_message(message):
+            # Send immediately (critical alerts, grouping disabled, or with images)
+            if self.notification_manager:
+                results = await self.notification_manager.send_notification(
+                    message=message,
+                    priority=alert_priority,
+                    title=title,
+                    image_data=image_data,
+                    image_filename=image_filename
+                )
+                if any(results.values()):
+                    self.rate_limiter.record_alert()
+                    return True
+            elif await self.telegram.send_message(message, alert_priority):
                 self.rate_limiter.record_alert()
                 return True
         

@@ -95,6 +95,28 @@ class Config:
     ENABLE_VOLATILITY_POSITION_SIZING = os.getenv('ENABLE_VOLATILITY_POSITION_SIZING', 'true').lower() == 'true'
     VOLATILITY_PERIODS = int(os.getenv('VOLATILITY_PERIODS', '20'))  # Number of periods for volatility calculation
     
+    # Advanced Notifications - Priority Levels
+    ENABLE_PRICE_CHARTS_IN_ALERTS = os.getenv('ENABLE_PRICE_CHARTS_IN_ALERTS', 'true').lower() == 'true'
+    PRICE_CHART_PERIODS = int(os.getenv('PRICE_CHART_PERIODS', '50'))  # Number of periods for price charts
+    
+    # Discord Notifications
+    ENABLE_DISCORD_NOTIFICATIONS = os.getenv('ENABLE_DISCORD_NOTIFICATIONS', 'false').lower() == 'true'
+    DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL', '')
+    
+    # Email Notifications
+    ENABLE_EMAIL_NOTIFICATIONS = os.getenv('ENABLE_EMAIL_NOTIFICATIONS', 'false').lower() == 'true'
+    EMAIL_SMTP_SERVER = os.getenv('EMAIL_SMTP_SERVER', 'smtp.gmail.com')
+    EMAIL_SMTP_PORT = int(os.getenv('EMAIL_SMTP_PORT', '587'))
+    EMAIL_SENDER = os.getenv('EMAIL_SENDER', '')
+    EMAIL_SENDER_PASSWORD = os.getenv('EMAIL_SENDER_PASSWORD', '')
+    EMAIL_RECIPIENTS = [e.strip() for e in os.getenv('EMAIL_RECIPIENTS', '').split(',') if e.strip()]
+    EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'true').lower() == 'true'
+    
+    # Webhook Notifications
+    ENABLE_WEBHOOK_NOTIFICATIONS = os.getenv('ENABLE_WEBHOOK_NOTIFICATIONS', 'false').lower() == 'true'
+    WEBHOOK_URL = os.getenv('WEBHOOK_URL', '')
+    WEBHOOK_HEADERS = os.getenv('WEBHOOK_HEADERS', '')  # JSON string for custom headers
+    
     @staticmethod
     def load_price_levels() -> Dict[str, List[Dict]]:
         """Load price level configurations from JSON file"""

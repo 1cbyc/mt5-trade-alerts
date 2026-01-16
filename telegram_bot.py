@@ -6,6 +6,7 @@ from typing import Optional, Callable
 from datetime import datetime, timedelta
 import io
 import os
+from notification_manager import AlertPriority
 
 logger = logging.getLogger(__name__)
 
@@ -21,16 +22,65 @@ class TelegramNotifier:
         self.trade_db = None  # Will be set by main service
         self.chart_generator = None  # Will be set by main service
     
-    async def send_message(self, message: str) -> bool:
-        """Send a message to Telegram"""
+    async def send_message(self, message: str, priority: AlertPriority = AlertPriority.NORMAL) -> bool:
+        """Send a message to Telegram with priority formatting"""
         if not self.enabled:
             return False
         
         try:
-            await self.bot.send_message(chat_id=self.chat_id, text=message, parse_mode='HTML')
+            # Add priority emoji based on priority level
+            priority_emojis = {
+                AlertPriority.CRITICAL: '🚨',
+                AlertPriority.IMPORTANT: '⚠️',
+                AlertPriority.NORMAL: ''
+            }
+            emoji = priority_emojis.get(priority, '')
+            formatted_message = f"{emoji} {message}" if emoji else message
+            
+            await self.bot.send_message(chat_id=self.chat_id, text=formatted_message, parse_mode='HTML')
             return True
         except TelegramError as e:
             logger.error(f"Failed to send Telegram message: {e}")
+            return False
+    
+    async def send_message_with_image(
+        self,
+        message: str,
+        priority: AlertPriority = AlertPriority.NORMAL,
+        title: Optional[str] = None,
+        image_data: Optional[bytes] = None,
+        image_filename: Optional[str] = None
+    ) -> bool:
+        """Send a message with image attachment to Telegram"""
+        if not self.enabled:
+            return False
+        
+        try:
+            # Format message with priority
+            priority_emojis = {
+                AlertPriority.CRITICAL: '🚨',
+                AlertPriority.IMPORTANT: '⚠️',
+                AlertPriority.NORMAL: ''
+            }
+            emoji = priority_emojis.get(priority, '')
+            formatted_message = f"{emoji} {message}" if emoji else message
+            
+            if title:
+                formatted_message = f"<b>{title}</b>\n\n{formatted_message}"
+            
+            if image_data:
+                await self.bot.send_photo(
+                    chat_id=self.chat_id,
+                    photo=io.BytesIO(image_data),
+                    caption=formatted_message,
+                    parse_mode='HTML'
+                )
+            else:
+                await self.bot.send_message(chat_id=self.chat_id, text=formatted_message, parse_mode='HTML')
+            
+            return True
+        except TelegramError as e:
+            logger.error(f"Failed to send Telegram message with image: {e}")
             return False
     
     def format_trade_alert(self, trade: dict) -> str:

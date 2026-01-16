@@ -354,3 +354,82 @@ class ChartGenerator:
             logger.error(f"Error generating performance summary chart: {e}")
             plt.close()
             return None
+    
+    def generate_price_chart(
+        self,
+        symbol: str,
+        timeframe: int = 16385,  # MT5 TIMEFRAME_H1
+        periods: int = 50,
+        highlight_price: Optional[float] = None,
+        highlight_label: Optional[str] = None
+    ) -> Optional[bytes]:
+        """
+        Generate a price chart for a symbol (for alerts)
+        
+        Args:
+            symbol: Symbol to chart
+            timeframe: MT5 timeframe
+            periods: Number of periods to show
+            highlight_price: Optional price level to highlight
+            highlight_label: Optional label for highlighted price
+        
+        Returns:
+            Image bytes
+        """
+        try:
+            import MetaTrader5 as mt5
+            
+            # Get historical data
+            rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, periods)
+            if rates is None or len(rates) == 0:
+                logger.warning(f"No data available for {symbol}")
+                return None
+            
+            # Convert to DataFrame-like structure
+            import numpy as np
+            times = [datetime.fromtimestamp(r[0]) for r in rates]
+            opens = [r[1] for r in rates]
+            highs = [r[2] for r in rates]
+            lows = [r[3] for r in rates]
+            closes = [r[4] for r in rates]
+            volumes = [r[5] for r in rates]
+            
+            # Create chart
+            fig, ax = plt.subplots(figsize=(10, 6))
+            
+            # Plot candlesticks (simplified as line chart)
+            ax.plot(times, closes, linewidth=2, color='#00ff88', label='Close Price')
+            ax.fill_between(times, lows, highs, alpha=0.2, color='gray', label='High/Low Range')
+            
+            # Highlight price level if provided
+            if highlight_price:
+                ax.axhline(
+                    y=highlight_price,
+                    color='yellow',
+                    linestyle='--',
+                    linewidth=2,
+                    label=highlight_label or f'Level: {highlight_price}'
+                )
+            
+            ax.set_xlabel('Time', fontsize=12)
+            ax.set_ylabel('Price', fontsize=12)
+            ax.set_title(f'{symbol} Price Chart', fontsize=14, fontweight='bold')
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+            
+            # Format x-axis
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
+            plt.xticks(rotation=45)
+            
+            plt.tight_layout()
+            
+            # Return as bytes
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+            buf.seek(0)
+            plt.close()
+            return buf.getvalue()
+        except Exception as e:
+            logger.error(f"Error generating price chart for {symbol}: {e}")
+            plt.close()
+            return None
