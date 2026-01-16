@@ -402,7 +402,7 @@ class ChartGenerator:
             ax.fill_between(times, lows, highs, alpha=0.2, color='gray', label='High/Low Range')
             
             # Highlight price level if provided
-            if highlight_price:
+            if highlight_price is not None:
                 ax.axhline(
                     y=highlight_price,
                     color='yellow',

@@ -97,8 +97,9 @@ class DiscordNotifier:
                 }
                 
                 # Discord requires form-data for file uploads
+                import json
                 data = aiohttp.FormData()
-                data.add_field('payload_json', str(payload).replace("'", '"'))
+                data.add_field('payload_json', json.dumps(payload))
                 data.add_field('file', image_data, filename=image_filename or 'chart.png', content_type='image/png')
                 
                 async with aiohttp.ClientSession() as session:

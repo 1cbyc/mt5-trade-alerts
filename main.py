@@ -347,7 +347,8 @@ class MT5AlertService:
                 logger.error(f"Failed to initialize Discord notifier: {e}")
         
         # Register Email channel if enabled
-        if Config.ENABLE_EMAIL_NOTIFICATIONS and Config.EMAIL_SENDER and Config.EMAIL_RECIPIENTS:
+        if (Config.ENABLE_EMAIL_NOTIFICATIONS and Config.EMAIL_SMTP_SERVER and 
+            Config.EMAIL_SENDER and Config.EMAIL_SENDER_PASSWORD and Config.EMAIL_RECIPIENTS):
             try:
                 email_notifier = EmailNotifier(
                     smtp_server=Config.EMAIL_SMTP_SERVER,

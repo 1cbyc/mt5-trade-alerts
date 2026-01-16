@@ -87,9 +87,13 @@ class NotificationManager:
                     )
                 elif hasattr(channel, 'send_message'):
                     # Fallback to text-only
-                    formatted_message = self._format_message_with_priority(
-                        message, priority, title, channel_name
-                    )
+                    # Don't format priority for Telegram - it handles its own formatting
+                    if channel_name == 'telegram':
+                        formatted_message = f"{title}\n\n{message}" if title else message
+                    else:
+                        formatted_message = self._format_message_with_priority(
+                            message, priority, title, channel_name
+                        )
                     success = await channel.send_message(formatted_message, priority=priority)
                 else:
                     logger.warning(f"Channel {channel_name} doesn't support send_message")
