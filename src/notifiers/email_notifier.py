@@ -7,7 +7,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.image import MIMEImage
 from typing import Optional, List
-from notification_manager import AlertPriority
+from .notification_manager import AlertPriority
 
 logger = logging.getLogger(__name__)
 
