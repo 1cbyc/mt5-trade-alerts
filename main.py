@@ -12,8 +12,6 @@ from trade_history import TradeHistoryDB
 from chart_generator import ChartGenerator
 from ml_profit_analyzer import MLProfitAnalyzer
 from volatility_calculator import VolatilityCalculator
-from ml_profit_analyzer import MLProfitAnalyzer
-from volatility_calculator import VolatilityCalculator
 
 logging.basicConfig(
     level=logging.INFO,
