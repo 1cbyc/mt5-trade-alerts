@@ -21,6 +21,7 @@ class TelegramNotifier:
         self.mt5_monitor = None  # Will be set by main service
         self.trade_db = None  # Will be set by main service
         self.chart_generator = None  # Will be set by main service
+        self.alert_service = None  # Will be set by main service
     
     async def send_message(self, message: str, priority: AlertPriority = AlertPriority.NORMAL) -> bool:
         """Send a message to Telegram with priority formatting"""
@@ -108,7 +109,7 @@ class TelegramNotifier:
             status = "OPENED (SELL)"
         
         message = f"{emoji} <b>Trade {status}</b>\n\n"
-        message += f"Ticket: {ticket}\n"
+        message += f"Ticket: <code>{ticket}</code>\n"
         message += f"Symbol: {symbol}\n"
         message += f"Type: {trade_type}\n"
         message += f"Volume: {volume}\n"
@@ -142,7 +143,7 @@ class TelegramNotifier:
             emoji = "📋"
         
         message = f"{emoji} <b>Order Alert</b>\n\n"
-        message += f"Ticket: {ticket}\n"
+        message += f"Ticket: <code>{ticket}</code>\n"
         message += f"Symbol: {symbol}\n"
         message += f"Type: {order_type}\n"
         message += f"Volume: {volume}\n"
@@ -256,7 +257,7 @@ class TelegramNotifier:
         message += "\n\n"
         
         message += f"Symbol: {symbol}\n"
-        message += f"Ticket: {ticket}\n"
+        message += f"Ticket: <code>{ticket}</code>\n"
         message += f"Type: {trade_type}\n"
         message += f"Current Profit: 💰 {profit:.2f} ({profit_pct:.2f}%)\n"
         message += f"Open Price: {price_open}\n"
@@ -321,7 +322,7 @@ class TelegramNotifier:
         
         message = f"{emoji} <b>Pending Order Alert</b>\n\n"
         message += f"Symbol: {symbol}\n"
-        message += f"Order Ticket: {ticket}\n"
+        message += f"Order Ticket: <code>{ticket}</code>\n"
         message += f"Order Type: {order_type}\n"
         message += f"Order Price: {order_price}\n"
         message += f"Current Price: {current_price}\n"
@@ -337,9 +338,23 @@ class TelegramNotifier:
         message = self.format_pending_order_alert(alert)
         return await self.send_message(message)
     
-    async def send_test_message(self) -> bool:
-        """Send a test message to verify connection"""
-        message = "🤖 <b>MT5 Trade Alerts Bot</b>\n\nBot is connected and ready!"
+    async def send_startup_message(self, account_info: dict = None, account_label: str = '') -> bool:
+        """Send startup message with account info"""
+        label_line = f" — <b>{account_label}</b>" if account_label else ""
+        message = f"🤖 <b>MT5 Trade Alerts{label_line}</b>\n"
+        message += "━━━━━━━━━━━━━━━━━━━━\n"
+        message += "✅ Bot started &amp; connected\n\n"
+
+        if account_info:
+            message += f"👤 <b>Account:</b> {account_info.get('login', 'N/A')}\n"
+            message += f"🏦 <b>Server:</b> {account_info.get('server', 'N/A')}\n"
+            message += f"💰 <b>Balance:</b> {account_info.get('balance', 0):.2f} {account_info.get('currency', '')}\n"
+            message += f"📊 <b>Equity:</b> {account_info.get('equity', 0):.2f} {account_info.get('currency', '')}\n"
+            leverage = account_info.get('leverage', 0)
+            if leverage:
+                message += f"⚡ <b>Leverage:</b> 1:{leverage}\n"
+
+        message += "\nSend /help for all commands."
         return await self.send_message(message)
     
     def set_mt5_monitor(self, mt5_monitor):
@@ -391,7 +406,7 @@ class TelegramNotifier:
             profit_emoji = "💰" if profit >= 0 else "📉"
             
             message += f"<b>{pos.get('symbol', 'N/A')}</b> - {pos.get('type', 'N/A')}\n"
-            message += f"Ticket: {pos.get('ticket', 'N/A')}\n"
+            message += f"Ticket: <code>{pos.get('ticket', 'N/A')}</code>\n"
             message += f"Volume: {pos.get('volume', 0)}\n"
             message += f"Open: {pos.get('price_open', 0)}\n"
             message += f"Current: {pos.get('price_current', 0)}\n"
@@ -416,7 +431,7 @@ class TelegramNotifier:
         
         for order in orders:
             message += f"<b>{order.get('symbol', 'N/A')}</b> - {order.get('type', 'N/A')}\n"
-            message += f"Ticket: {order.get('ticket', 'N/A')}\n"
+            message += f"Ticket: <code>{order.get('ticket', 'N/A')}</code>\n"
             message += f"Volume: {order.get('volume', 0)}\n"
             message += f"Price: {order.get('price_open', 0)}\n"
             message += f"Current: {order.get('price_current', 0)}\n"
@@ -538,7 +553,7 @@ class TelegramNotifier:
         # Best/Worst Trades
         if best_trade:
             message += f"<b>🏆 Best Trade</b>\n"
-            message += f"Ticket: {best_trade.get('ticket', 'N/A')}\n"
+            message += f"Ticket: <code>{best_trade.get('ticket', 'N/A')}</code>\n"
             message += f"Symbol: {best_trade.get('symbol', 'N/A')} ({best_trade.get('type', 'N/A')})\n"
             message += f"Profit: 💰 {best_trade.get('profit', 0):.2f}\n"
             message += f"Volume: {best_trade.get('volume', 0)}\n"
@@ -551,7 +566,7 @@ class TelegramNotifier:
         
         if worst_trade:
             message += f"<b>📉 Worst Trade</b>\n"
-            message += f"Ticket: {worst_trade.get('ticket', 'N/A')}\n"
+            message += f"Ticket: <code>{worst_trade.get('ticket', 'N/A')}</code>\n"
             message += f"Symbol: {worst_trade.get('symbol', 'N/A')} ({worst_trade.get('type', 'N/A')})\n"
             message += f"Loss: 📉 {worst_trade.get('profit', 0):.2f}\n"
             message += f"Volume: {worst_trade.get('volume', 0)}\n"
@@ -602,7 +617,12 @@ class TelegramNotifier:
         message += "  Example: /modify 123456 1.1000 1.1100\n"
         message += "  Use 0 to remove SL/TP\n"
         message += "/partial &lt;ticket&gt; &lt;volume&gt; - Partially close position\n"
-        message += "  Example: /partial 123456 0.5\n\n"
+        message += "  Example: /partial 123456 0.5\n"
+        message += "/breakeven &lt;ticket&gt; - Move SL to entry price\n"
+        message += "  Example: /breakeven 123456\n"
+        message += "/trail &lt;ticket&gt; &lt;distance&gt; - Set trailing stop (price units)\n"
+        message += "  Example: /trail 123456 2.0 (gold $2 trail)\n"
+        message += "  /trail 123456 off — disable trailing stop\n\n"
         message += "<b>📊 Analytics Commands:</b>\n"
         message += "/chart [type] [days] - Generate performance charts\n"
         message += "  Types: summary, equity, daily, distribution\n"
@@ -725,14 +745,14 @@ class TelegramNotifier:
         
         if result.get('success'):
             message = f"✅ <b>Position Closed</b>\n\n"
-            message += f"Ticket: {result.get('ticket')}\n"
+            message += f"Ticket: <code>{result.get('ticket')}</code>\n"
             message += f"Symbol: {result.get('symbol')}\n"
             message += f"Volume: {result.get('volume')}\n"
             message += f"Price: {result.get('price')}\n"
             profit = result.get('profit', 0)
             profit_emoji = "💰" if profit >= 0 else "📉"
             message += f"Profit: {profit_emoji} {profit:.2f}\n"
-            message += f"Deal Ticket: {result.get('deal_ticket')}"
+            message += f"Deal Ticket: <code>{result.get('deal_ticket')}</code>"
         else:
             message = f"❌ <b>Failed to Close Position</b>\n\n"
             message += f"Error: {result.get('error', 'Unknown error')}"
@@ -818,7 +838,7 @@ class TelegramNotifier:
 
         if result.get('success'):
             message = f"✅ <b>Order Cancelled</b>\n\n"
-            message += f"Ticket: {result.get('ticket')}\n"
+            message += f"Ticket: <code>{result.get('ticket')}</code>\n"
             message += f"Symbol: {result.get('symbol')}\n"
             message += f"Volume: {result.get('volume')}\n"
             message += f"Price: {result.get('price')}"
@@ -880,7 +900,7 @@ class TelegramNotifier:
         
         if result.get('success'):
             message = f"✅ <b>Position Modified</b>\n\n"
-            message += f"Ticket: {result.get('ticket')}\n"
+            message += f"Ticket: <code>{result.get('ticket')}</code>\n"
             message += f"Symbol: {result.get('symbol')}\n"
             if result.get('sl') is not None:
                 message += f"Stop Loss: {result.get('sl')}\n"
@@ -921,7 +941,7 @@ class TelegramNotifier:
         
         if result.get('success'):
             message = f"✅ <b>Position Partially Closed</b>\n\n"
-            message += f"Ticket: {result.get('ticket')}\n"
+            message += f"Ticket: <code>{result.get('ticket')}</code>\n"
             message += f"Symbol: {result.get('symbol')}\n"
             message += f"Volume Closed: {result.get('volume_closed')}\n"
             message += f"Volume Remaining: {result.get('volume_remaining')}\n"
@@ -929,13 +949,133 @@ class TelegramNotifier:
             profit = result.get('profit', 0)
             profit_emoji = "💰" if profit >= 0 else "📉"
             message += f"Profit: {profit_emoji} {profit:.2f}\n"
-            message += f"Deal Ticket: {result.get('deal_ticket')}"
+            message += f"Deal Ticket: <code>{result.get('deal_ticket')}</code>"
         else:
             message = f"❌ <b>Failed to Partially Close Position</b>\n\n"
             message += f"Error: {result.get('error', 'Unknown error')}"
         
         await update.message.reply_text(message, parse_mode='HTML')
     
+    async def handle_breakeven(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /breakeven <ticket> — move SL to entry price"""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+
+        if not self.mt5_monitor:
+            await update.message.reply_text("❌ MT5 monitor not available.")
+            return
+
+        if not context.args or len(context.args) < 1:
+            await update.message.reply_text("❌ Usage: /breakeven <ticket>\nExample: /breakeven 123456")
+            return
+
+        try:
+            ticket = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("❌ Invalid ticket number.")
+            return
+
+        result = self.mt5_monitor.set_breakeven(ticket)
+
+        if result.get('success'):
+            message = (
+                f"✅ <b>Break-Even Set</b>\n\n"
+                f"Ticket: <code>{result.get('ticket')}</code>\n"
+                f"Symbol: {result.get('symbol')}\n"
+                f"SL moved to entry: {result.get('entry_price')}"
+            )
+        else:
+            message = f"❌ <b>Break-Even Failed</b>\n\nError: {result.get('error', 'Unknown error')}"
+
+        await update.message.reply_text(message, parse_mode='HTML')
+
+    async def handle_trail(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /trail <ticket> <distance> or /trail <ticket> off"""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+
+        if not self.mt5_monitor:
+            await update.message.reply_text("❌ MT5 monitor not available.")
+            return
+
+        if not self.alert_service:
+            await update.message.reply_text("❌ Alert service not available.")
+            return
+
+        if not context.args or len(context.args) < 2:
+            await update.message.reply_text(
+                "❌ Usage: /trail <ticket> <distance>\n"
+                "  distance = price distance (e.g. 2.0 for gold = $2 trail, 0.0010 for forex = 10 pips)\n"
+                "  /trail <ticket> off — disable trailing stop\n\n"
+                "Examples:\n"
+                "/trail 123456 2.0\n"
+                "/trail 123456 off"
+            )
+            return
+
+        try:
+            ticket = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("❌ Invalid ticket number.")
+            return
+
+        if context.args[1].lower() == 'off':
+            self.alert_service.remove_trailing_stop(ticket)
+            await update.message.reply_text(
+                f"✅ <b>Trailing Stop Disabled</b>\n\nTicket: <code>{ticket}</code>",
+                parse_mode='HTML'
+            )
+            return
+
+        try:
+            distance = float(context.args[1])
+            if distance <= 0:
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text("❌ Distance must be a positive number.\nExample: /trail 123456 2.0")
+            return
+
+        import MetaTrader5 as mt5
+        position = mt5.positions_get(ticket=ticket)
+        if not position or len(position) == 0:
+            await update.message.reply_text(f"❌ Position {ticket} not found.")
+            return
+
+        pos = position[0]
+        symbol_info = mt5.symbol_info(pos.symbol)
+        digits = symbol_info.digits if symbol_info else 5
+
+        tick = mt5.symbol_info_tick(pos.symbol)
+        current_price = (tick.bid if tick else pos.price_current) if pos.type == mt5.ORDER_TYPE_BUY else (tick.ask if tick else pos.price_current)
+
+        if pos.type == mt5.ORDER_TYPE_BUY:
+            initial_sl = round(current_price - distance, digits)
+        else:
+            initial_sl = round(current_price + distance, digits)
+
+        if initial_sl > 0:
+            sl_result = self.mt5_monitor.modify_position(ticket, sl=initial_sl, tp=None)
+            if not sl_result.get('success') and 'already' not in sl_result.get('error', '').lower():
+                await update.message.reply_text(
+                    f"❌ <b>Failed to set initial trailing SL</b>\n\nError: {sl_result.get('error', 'Unknown')}",
+                    parse_mode='HTML'
+                )
+                return
+
+        self.alert_service.set_trailing_stop(ticket, distance)
+
+        message = (
+            f"✅ <b>Trailing Stop Active</b>\n\n"
+            f"Ticket: <code>{ticket}</code>\n"
+            f"Symbol: {pos.symbol}\n"
+            f"Trail Distance: {distance}\n"
+            f"Initial SL: {initial_sl}\n"
+            f"SL will update automatically as price moves in your favour."
+        )
+        await update.message.reply_text(message, parse_mode='HTML')
+
     async def handle_chart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /chart command - Generate and send performance charts"""
         if not self._check_authorized(update):
@@ -1018,11 +1158,11 @@ class TelegramNotifier:
                 trade = self.trade_db.get_trade(ticket)
                 if trade:
                     message = f"✅ <b>Note Added</b>\n\n"
-                    message += f"Ticket: {ticket}\n"
+                    message += f"Ticket: <code>{ticket}</code>\n"
                     message += f"Symbol: {trade.get('symbol', 'N/A')}\n"
                     message += f"Note: {note}"
                 else:
-                    message = f"✅ Note added to trade {ticket}\n\nNote: {note}"
+                    message = f"✅ Note added to trade <code>{ticket}</code>\n\nNote: {note}"
             else:
                 message = f"❌ Trade {ticket} not found in history."
             
@@ -1140,7 +1280,7 @@ class TelegramNotifier:
                 time_close = time_close[:10]  # Just date
             
             message += f"{i}. <b>{trade.get('symbol', 'N/A')}</b> {trade.get('type', 'N/A')}\n"
-            message += f"   Ticket: {trade.get('ticket')} | {profit_emoji} {profit:.2f}\n"
+            message += f"   Ticket: <code>{trade.get('ticket')}</code> | {profit_emoji} {profit:.2f}\n"
             message += f"   {time_close}\n\n"
         
         message += f"<b>Total P/L: {total_profit:.2f}</b>"
@@ -1271,6 +1411,8 @@ class TelegramNotifier:
             self.application.add_handler(CommandHandler("cancelorder", self.handle_cancelorder))
             self.application.add_handler(CommandHandler("modify", self.handle_modify))
             self.application.add_handler(CommandHandler("partial", self.handle_partial))
+            self.application.add_handler(CommandHandler("breakeven", self.handle_breakeven))
+            self.application.add_handler(CommandHandler("trail", self.handle_trail))
             self.application.add_handler(CommandHandler("chart", self.handle_chart))
             self.application.add_handler(CommandHandler("note", self.handle_note))
             self.application.add_handler(CommandHandler("export", self.handle_export))
@@ -1318,7 +1460,7 @@ class TelegramNotifier:
         
         message = f"{emoji} <b>Position Size Warning</b>\n\n"
         message += f"Symbol: {alert.get('symbol', 'N/A')}\n"
-        message += f"Ticket: {alert.get('ticket', 'N/A')}\n"
+        message += f"Ticket: <code>{alert.get('ticket', 'N/A')}</code>\n"
         message += f"Volume: {alert.get('volume', 0)}\n\n"
         message += f"Position Size: {alert.get('position_size_pct', 0):.2f}% of account\n"
         message += f"Maximum Allowed: {alert.get('max_size_pct', 0):.2f}%\n"

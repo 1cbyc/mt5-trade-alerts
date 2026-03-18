@@ -6,6 +6,7 @@ import logging
 import signal
 import sys
 from src.services.alert_service import MT5AlertService
+from src.utils.config import Config
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,12 +29,12 @@ def signal_handler(service):
 
 
 async def main():
-    service = MT5AlertService()
-    
-    # Setup signal handlers
+    config = Config('config.env')
+    service = MT5AlertService(config=config)
+
     signal.signal(signal.SIGINT, signal_handler(service))
     signal.signal(signal.SIGTERM, signal_handler(service))
-    
+
     await service.run()
 
 

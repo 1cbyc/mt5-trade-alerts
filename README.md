@@ -16,9 +16,11 @@ Get real-time Telegram alerts for your MetaTrader 5 trades, orders, and price le
 - **Volatility Analysis**: Position sizing suggestions based on market volatility
 - **Trade Journal**: Add notes to trades for later review
 - **CSV Export**: Export trade data for external analysis
+- **Multiple Accounts**: Run separate bot instances for multiple MT5 accounts simultaneously
 
 ## How it works
-1. Monitors Volatility 25 Index and Step Index for price movements
+
+1. Monitors configured symbols for price movements
 2. Tracks all your active trades and orders automatically
 3. Sends alerts when trades open and close
 4. Sends alerts when orders are placed or executed
@@ -61,6 +63,9 @@ pip install -r requirements.txt
 ### config.env
 
 ```env
+# Account label shown in all alerts (e.g. "Live", "Demo", "GoatFunded 1")
+ACCOUNT_LABEL=My Account
+
 # MT5 Configuration
 MT5_LOGIN=your_mt5_login
 MT5_PASSWORD=your_mt5_password
@@ -97,14 +102,6 @@ Configure price levels you want to monitor:
       "type": "below",
       "description": "Key support level"
     }
-  ],
-  "GBPUSD": [
-    {
-      "id": "target_1",
-      "price": 1.2500,
-      "type": "both",
-      "description": "Take profit level"
-    }
   ]
 }
 ```
@@ -112,121 +109,128 @@ Configure price levels you want to monitor:
 **Price Level Types:**
 - `above`: Alert when price goes above the level
 - `below`: Alert when price goes below the level
-- `both`: Alert when price reaches the level (exact match)
+- `both`: Alert when price reaches the level from either direction
 
 ## Usage
 
-### Start the Service
+### Single Account
 
 ```bash
 python main.py
 ```
 
-The service will:
-1. Connect to your MT5 terminal
-2. Connect to Telegram
-3. Start monitoring trades, orders, and price levels
-4. Send alerts to your Telegram chat
-5. Enable interactive Telegram commands for trade management and analytics
+This uses `config.env` by default.
 
-### Stop the Service
-
-Press `Ctrl+C` to gracefully shutdown the service.
-
-## Alert Examples
-
-### Trade Alert
-```
-🟢 Trade OPENED (BUY)
-
-Ticket: 12345678
-Symbol: EURUSD
-Type: BUY
-Volume: 0.10
-Open Price: 1.0950
-Current Price: 1.0955
-Profit: 💰 5.00
-Time: 2024-01-15 10:30:00
-```
-
-### Order Alert
-```
-📋 Order Alert
-
-Ticket: 87654321
-Symbol: GBPUSD
-Type: BUY LIMIT
-Volume: 0.10
-Price: 1.2500
-Current Price: 1.2480
-Setup Time: 2024-01-15 10:00:00
-Expiration: 2024-01-15 18:00:00
-```
-
-### Price Level Alert
-```
-🎯 Price Level Reached
-
-Symbol: EURUSD
-Level ID: resistance_1
-Target Price: 1.1000
-Current Price: 1.1001
-Direction: above
-Time: 2024-01-15 11:00:00
-```
-
-## Managing Price Levels
-
-You can edit `price_levels.json` directly or use the provided utility script:
+### Specifying a Config File
 
 ```bash
-python manage_levels.py
+python main.py --config configs/account1.env
 ```
+
+### Multiple Accounts
+
+You can run separate bot instances for multiple MT5 accounts simultaneously. Each instance connects to its own MT5 terminal, uses its own Telegram bot, and maintains its own trade history database.
+
+#### Step 1 — Create a config file per account
+
+Store account configs in the `configs/` folder:
+
+```
+configs/
+  account1.env
+  account2.env
+  account3.env
+```
+
+Use `configs/example.env` as a template. Key fields to set per account:
+
+```env
+ACCOUNT_LABEL=GoatFunded 1        # Shows in every alert so you know which account
+MT5_LOGIN=314712725
+MT5_PASSWORD=your_password
+MT5_SERVER=GoatFunded-Server
+MT5_PATH=C:\MT5\GF1\terminal64.exe  # Unique terminal path per account
+TELEGRAM_BOT_TOKEN=your_bot_token   # Unique bot token per account
+TELEGRAM_CHAT_ID=your_chat_id
+TRADE_HISTORY_DB_PATH=data/account1_trades.db  # Unique DB per account
+```
+
+All `configs/*.env` files are git-ignored so credentials are never committed.
+
+#### Step 2 — Create separate MT5 terminal installations
+
+Each bot instance needs its own MT5 terminal folder so they can run independently. MT5 does not allow two processes to share the same installation directory.
+
+**For accounts on the same broker**, copy the terminal folder once per account:
+
+```powershell
+Copy-Item "C:\Program Files\MetaTrader 5" "C:\MT5\GF1" -Recurse
+Copy-Item "C:\Program Files\MetaTrader 5" "C:\MT5\GF2" -Recurse
+Copy-Item "C:\Program Files\MetaTrader 5" "C:\MT5\GF3" -Recurse
+# ... repeat for each account
+```
+
+Then set `MT5_PATH` in each config to the corresponding `terminal64.exe`:
+
+```env
+MT5_PATH=C:\MT5\GF1\terminal64.exe
+```
+
+**For accounts on different brokers** (e.g., one GoatFunded account and one Deriv account), their MT5 terminals are already separate installations, so no copying is needed — just point each config to its own terminal path.
+
+#### Step 3 — Create a separate Telegram bot per account
+
+Each account needs its own bot token so the instances do not conflict. Go to [@BotFather](https://t.me/botfather), create a bot for each account, and set the token in the corresponding config file.
+
+#### Step 4 — Enable algorithmic trading in each terminal
+
+This must be done in every terminal instance, including each copied folder. The bot cannot place or manage trades without it.
+
+In each MT5 terminal:
+
+1. Go to Tools > Options > Expert Advisors
+2. Check "Allow automated trading"
+3. Check "Allow DLL imports"
+4. Click OK
+5. Make sure the AutoTrading button in the toolbar is enabled (green)
+
+#### Step 5 — Run all accounts
+
+Open a separate terminal window per account and run:
+
+```bash
+python main.py --config configs/account1.env
+python main.py --config configs/account2.env
+python main.py --config configs/account3.env
+```
+
+Each process will launch its MT5 terminal, log in automatically using the credentials in the config, connect its Telegram bot, and start monitoring independently.
+
+The startup message sent to Telegram will show the account label, login number, server, balance, and equity so you can immediately confirm which account is running.
 
 ## Telegram Commands
 
-The bot supports various commands for monitoring and managing your trades. Send these commands directly to your bot in Telegram.
+The bot supports various commands for monitoring and managing your trades. Send commands directly to your bot in telegram.
 
 ### Account & Position Commands
 
 #### `/status`
 View your account status including balance, equity, margin, and open positions count.
 
-**Example:**
-```
-/status
-```
-
 #### `/positions`
 List all open positions with current profit/loss information.
-
-**Example:**
-```
-/positions
-```
 
 #### `/orders`
 List all pending orders (buy limits, sell limits, stop orders, etc.).
 
-**Example:**
-```
-/orders
-```
-
 #### `/summary`
 Get a daily/weekly P/L summary with trade statistics.
-
-**Example:**
-```
-/summary
-```
 
 ### Trade Management Commands
 
 #### `/close <ticket>`
 Close a specific position by ticket number.
 
-**Example:**
 ```
 /close 12345678
 ```
@@ -234,20 +238,27 @@ Close a specific position by ticket number.
 #### `/closeall`
 Close all open positions at once.
 
-**Example:**
+#### `/closeallorders`
+Cancel all pending orders at once.
+
+#### `/cancelorder <ticket>`
+Cancel a specific pending order by ticket number.
+
 ```
-/closeall
+/cancelorder 12345678
 ```
 
 #### `/modify <ticket> <sl> <tp>`
 Modify stop loss and/or take profit for a position.
 
 **Parameters:**
+
 - `ticket`: Position ticket number
 - `sl`: New stop loss price (use `0` to remove, omit to keep current)
 - `tp`: New take profit price (use `0` to remove, omit to keep current)
 
 **Examples:**
+
 ```
 /modify 12345678 1.0950 1.1050
 /modify 12345678 0 1.1050    # Remove SL, set TP
@@ -258,12 +269,40 @@ Modify stop loss and/or take profit for a position.
 Partially close a position.
 
 **Parameters:**
+
 - `ticket`: Position ticket number
 - `volume`: Volume to close (must be less than position volume)
 
 **Example:**
+
 ```
 /partial 12345678 0.5
+```
+
+#### `/breakeven <ticket>`
+Move the stop loss to the entry price (break-even) for a position.
+
+```
+/breakeven 12345678
+```
+
+#### `/trail <ticket> <distance>`
+
+Enable a software trailing stop on a position. The stop loss follows price as it moves in your favour, maintaining the specified distance.
+
+**Parameters:**
+
+- `ticket`: Position ticket number
+- `distance`: Trail distance in price units (e.g. `2.0` for gold = $2.00, `0.0010` for EURUSD = 10 pips)
+- Use `off` instead of a distance to disable trailing
+
+**Examples:**
+
+```
+/trail 12345678 2.0          # Gold: $2 trailing stop
+/trail 12345678 0.0010       # Forex: 10 pips trailing stop
+/trail 12345678 10           # Index: 10 point trailing stop
+/trail 12345678 off          # Disable trailing stop
 ```
 
 ### Analytics & History Commands
@@ -271,14 +310,8 @@ Partially close a position.
 #### `/chart [type] [days]`
 Generate and send performance charts as images.
 
-**Parameters:**
-- `type`: Chart type - `summary` (default), `equity`, `daily`, or `distribution`
-- `days`: Number of days to analyze (default: 30)
-
-**Examples:**
 ```
 /chart                    # Summary chart for last 30 days
-/chart summary 60         # Summary chart for last 60 days
 /chart equity 30          # Equity curve for last 30 days
 /chart daily 14           # Daily P/L chart for last 14 days
 /chart distribution 30    # Win/loss distribution for last 30 days
@@ -288,27 +321,23 @@ Generate and send performance charts as images.
 View your trade history with optional filters.
 
 **Parameters:**
+
 - `days=X`: Number of days to look back (default: 7)
 - `symbol=X`: Filter by symbol (e.g., `EURUSD`)
 - `limit=X`: Maximum number of trades to show (default: 20)
 
 **Examples:**
+
 ```
-/history                          # Last 7 days, 20 trades
-/history days=30                  # Last 30 days
-/history symbol=EURUSD            # Only EURUSD trades
-/history days=7 limit=10          # Last 7 days, top 10 trades
-/history days=30 symbol=GBPUSD limit=5
+/history
+/history days=30
+/history symbol=EURUSD
+/history days=7 limit=10
 ```
 
 #### `/note <ticket> <note>`
 Add a note to a trade in your journal.
 
-**Parameters:**
-- `ticket`: Trade ticket number
-- `note`: Your note text
-
-**Example:**
 ```
 /note 12345678 Good entry, followed trend perfectly
 ```
@@ -316,96 +345,76 @@ Add a note to a trade in your journal.
 #### `/export [days=X] [symbol=X]`
 Export trade history to CSV file.
 
-**Parameters:**
-- `days=X`: Number of days to export (default: all)
-- `symbol=X`: Filter by symbol (optional)
-
-**Examples:**
 ```
-/export                    # Export all trades
-/export days=30            # Export last 30 days
-/export symbol=EURUSD     # Export only EURUSD trades
-/export days=90 symbol=GBPUSD
+/export
+/export days=30
+/export symbol=EURUSD
 ```
 
 ### Smart Features Commands
 
 #### `/mlinsights [symbol]`
-View ML-learned trading insights and patterns.
-
-**Parameters:**
-- `symbol`: Optional symbol to analyze (default: all symbols)
-
-**Examples:**
-```
-/mlinsights                # Overall insights
-/mlinsights EURUSD         # Symbol-specific insights
-```
-
-**Shows:**
-- Win rate and trade statistics
-- Average profit targets
-- Average hold times
-- Risk/reward ratios
-- Profit distribution patterns
+View ML-learned trading insights and patterns including win rate, average profit targets, hold times, and risk/reward ratios.
 
 #### `/volatility <symbol>`
-View volatility metrics and position sizing suggestions.
+View volatility metrics and position sizing suggestions based on ATR and standard deviation.
 
-**Parameters:**
-- `symbol`: Trading symbol to analyze
-
-**Example:**
-```
-/volatility EURUSD
-```
-
-**Shows:**
-- Current volatility level (low/medium/high/very_high)
-- ATR (Average True Range)
-- Standard deviation
-- Suggested position size based on volatility
-- Risk calculations
-
-### Help Command
+### Help
 
 #### `/help` or `/start`
-Show the complete list of available commands with descriptions.
+Show the complete list of available commands.
 
-**Example:**
-```
-/help
-```
-
-## Command Categories Summary
+## Command Summary
 
 | Category | Commands |
 |----------|----------|
-| **Account Info** | `/status`, `/positions`, `/orders`, `/summary` |
-| **Trade Management** | `/close`, `/closeall`, `/modify`, `/partial` |
-| **Analytics** | `/chart`, `/history`, `/note`, `/export` |
-| **Smart Features** | `/mlinsights`, `/volatility` |
-| **Help** | `/help`, `/start` |
+| Account Info | `/status`, `/positions`, `/orders`, `/summary` |
+| Trade Management | `/close`, `/closeall`, `/modify`, `/partial`, `/breakeven`, `/trail` |
+| Order Management | `/closeallorders`, `/cancelorder` |
+| Analytics | `/chart`, `/history`, `/note`, `/export` |
+| Smart Features | `/mlinsights`, `/volatility` |
+| Help | `/help`, `/start` |
+
+## Project Structure
+
+```
+mt5-trade-alerts/
+├── main.py                      # Entry point
+├── config.env                   # Default single-account config (git-ignored)
+├── config.example.env           # Config template
+├── configs/                     # Per-account config files (all git-ignored)
+│   └── example.env              # Template for account configs
+├── src/
+│   ├── core/alert_management.py
+│   ├── services/alert_service.py
+│   ├── notifiers/               # Telegram, Discord, Email, Webhook
+│   ├── analytics/               # Trade history, charts, ML, volatility
+│   ├── monitoring/mt5_monitor.py
+│   └── utils/                   # Config, manage_levels
+├── data/                        # Databases, JSON, CSV exports
+└── scripts/                     # Utility scripts
+```
 
 ## Troubleshooting
 
 ### MT5 Connection Issues
-- Ensure MT5 terminal is installed and can be accessed
-- Verify your login credentials are correct
-- Check that the MT5_PATH points to the correct terminal executable
-- Make sure MT5 terminal is running (or the path allows auto-start)
 
-### Telegram Issues
-- Verify your bot token is correct
-- Ensure you've started a conversation with your bot
-- Check that your chat ID is correct
-- Test by sending a message to your bot manually
+- Ensure the MT5 terminal at `MT5_PATH` exists
+- Verify your login credentials are correct
+- Make sure algorithmic trading is enabled in the terminal (Tools > Options > Expert Advisors)
+- For multiple accounts, confirm each account has its own terminal folder
+
+### Telegram Conflicts (409 error)
+
+- Each account must use a unique bot token
+- Only one process per bot token can poll for updates at a time
+- Create separate bots via [@BotFather](https://t.me/botfather)
 
 ### No Alerts Received
-- Check the log file `mt5_alerts.log` for errors
-- Verify alert types are enabled in `config.env`
+
+- Check `mt5_alerts.log` for errors
+- Verify alert types are enabled in the config file
 - Ensure you have active trades/orders or configured price levels
-- Check that the monitoring interval is appropriate
 
 ## Logs
 
@@ -415,26 +424,9 @@ All activity is logged to:
 
 ## Security Notes
 
-- Never commit `config.env` to version control (it's in `.gitignore`)
-- Keep your MT5 credentials secure
-- Don't share your Telegram bot token
-- Use environment variables or secure vaults for production deployments
-
-
-## New Structure
-
-mt5-trade-alerts/
-├── main.py (48 lines - entry point)
-├── src/
-│   ├── core/alert_management.py
-│   ├── services/alert_service.py (950 lines)
-│   ├── notifiers/ (5 files)
-│   ├── analytics/ (4 files)
-│   ├── monitoring/mt5_monitor.py
-│   └── utils/ (2 files)
-├── data/ (databases, JSON, CSV)
-├── scripts/ (utility scripts)
-└── screenshots/ (demo images)
+- Never commit `config.env` or `configs/*.env` to version control (both are git-ignored)
+- Keep your MT5 credentials and Telegram bot tokens secure
+- Use a separate bot token for each account to avoid conflicts
 
 ## License
 
@@ -446,13 +438,7 @@ Contributions are welcome! Feel free to open issues or submit pull requests.
 
 ## Support
 
-For issues or questions, check the logs first. If you still need help, then:
+For issues or questions, check the logs first. If you still need help:
 
 - [Create an issue](https://github.com/1cbyc/mt5-trade-alerts/issues/new) on GitHub
-- Or, reach me on [x.com/1cbyc](https://x.com/1cbyc)
-
-Common issues are usually related to:
-- Incorrect credentials
-- MT5 terminal not accessible
-- Telegram bot not properly configured
-
+- Or reach me on [x.com/1cbyc](https://x.com/1cbyc)

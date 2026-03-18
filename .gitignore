@@ -16,6 +16,10 @@ config.env
 # User-specific configuration (if users want to keep their own price levels private)
 # price_levels.json
 
+# Account config files (contain credentials)
+configs/*.env
+!configs/example.env
+
 # Data files
 data/*.db
 data/*.csv

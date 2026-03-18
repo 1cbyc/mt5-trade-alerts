@@ -21,20 +21,22 @@ class MT5Monitor:
         
     def connect(self) -> bool:
         """Initialize and connect to MT5 terminal"""
+        init_kwargs = dict(login=self.login, password=self.password, server=self.server)
         if self.path:
-            if not mt5.initialize(path=self.path):
-                logger.error(f"MT5 initialization failed: {mt5.last_error()}")
-                return False
-        else:
-            if not mt5.initialize():
-                logger.error(f"MT5 initialization failed: {mt5.last_error()}")
-                return False
-        
-        authorized = mt5.login(self.login, password=self.password, server=self.server)
-        if not authorized:
-            logger.error(f"MT5 login failed: {mt5.last_error()}")
-            mt5.shutdown()
+            init_kwargs['path'] = self.path
+
+        if not mt5.initialize(**init_kwargs):
+            logger.error(f"MT5 initialization failed: {mt5.last_error()}")
             return False
+
+        # Verify we are logged into the correct account
+        info = mt5.account_info()
+        if info is None or info.login != self.login:
+            authorized = mt5.login(self.login, password=self.password, server=self.server)
+            if not authorized:
+                logger.error(f"MT5 login failed: {mt5.last_error()}")
+                mt5.shutdown()
+                return False
         
         self.connected = True
         account_info = mt5.account_info()
@@ -1478,6 +1480,46 @@ class MT5Monitor:
             'total_orders': len(orders),
             'errors': errors if errors else None
         }
+
+    def set_breakeven(self, ticket: int) -> Dict:
+        """
+        Move stop loss to entry price (break-even) for a position.
+
+        Args:
+            ticket: Position ticket number
+
+        Returns:
+            Dictionary with success status and details
+        """
+        if not self.connected:
+            return {'success': False, 'error': 'Not connected to MT5'}
+
+        position = mt5.positions_get(ticket=ticket)
+        if not position or len(position) == 0:
+            return {'success': False, 'error': f'Position {ticket} not found'}
+
+        pos = position[0]
+        entry_price = pos.price_open
+
+        symbol_info = mt5.symbol_info(pos.symbol)
+        if symbol_info:
+            entry_price = round(entry_price, symbol_info.digits)
+            point = symbol_info.point
+        else:
+            point = 0.00001
+
+        # Check if SL is already at or better than break-even
+        if pos.sl > 0:
+            if pos.type == mt5.ORDER_TYPE_BUY and pos.sl >= entry_price - point:
+                return {'success': False, 'error': 'Stop loss is already at or above break-even'}
+            if pos.type == mt5.ORDER_TYPE_SELL and pos.sl <= entry_price + point:
+                return {'success': False, 'error': 'Stop loss is already at or below break-even'}
+
+        result = self.modify_position(ticket, sl=entry_price, tp=None)
+        if result.get('success'):
+            result['entry_price'] = entry_price
+            result['symbol'] = pos.symbol
+        return result
 
     def modify_position(self, ticket: int, sl: float = None, tp: float = None) -> Dict:
         """
