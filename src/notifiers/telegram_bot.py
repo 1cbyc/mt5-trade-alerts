@@ -109,7 +109,7 @@ class TelegramNotifier:
             status = "OPENED (SELL)"
         
         message = f"{emoji} <b>Trade {status}</b>\n\n"
-        message += f"Ticket: {ticket}\n"
+        message += f"Ticket: <code>{ticket}</code>\n"
         message += f"Symbol: {symbol}\n"
         message += f"Type: {trade_type}\n"
         message += f"Volume: {volume}\n"
@@ -143,7 +143,7 @@ class TelegramNotifier:
             emoji = "📋"
         
         message = f"{emoji} <b>Order Alert</b>\n\n"
-        message += f"Ticket: {ticket}\n"
+        message += f"Ticket: <code>{ticket}</code>\n"
         message += f"Symbol: {symbol}\n"
         message += f"Type: {order_type}\n"
         message += f"Volume: {volume}\n"
@@ -257,7 +257,7 @@ class TelegramNotifier:
         message += "\n\n"
         
         message += f"Symbol: {symbol}\n"
-        message += f"Ticket: {ticket}\n"
+        message += f"Ticket: <code>{ticket}</code>\n"
         message += f"Type: {trade_type}\n"
         message += f"Current Profit: 💰 {profit:.2f} ({profit_pct:.2f}%)\n"
         message += f"Open Price: {price_open}\n"
@@ -322,7 +322,7 @@ class TelegramNotifier:
         
         message = f"{emoji} <b>Pending Order Alert</b>\n\n"
         message += f"Symbol: {symbol}\n"
-        message += f"Order Ticket: {ticket}\n"
+        message += f"Order Ticket: <code>{ticket}</code>\n"
         message += f"Order Type: {order_type}\n"
         message += f"Order Price: {order_price}\n"
         message += f"Current Price: {current_price}\n"
@@ -406,7 +406,7 @@ class TelegramNotifier:
             profit_emoji = "💰" if profit >= 0 else "📉"
             
             message += f"<b>{pos.get('symbol', 'N/A')}</b> - {pos.get('type', 'N/A')}\n"
-            message += f"Ticket: {pos.get('ticket', 'N/A')}\n"
+            message += f"Ticket: <code>{pos.get('ticket', 'N/A')}</code>\n"
             message += f"Volume: {pos.get('volume', 0)}\n"
             message += f"Open: {pos.get('price_open', 0)}\n"
             message += f"Current: {pos.get('price_current', 0)}\n"
@@ -431,7 +431,7 @@ class TelegramNotifier:
         
         for order in orders:
             message += f"<b>{order.get('symbol', 'N/A')}</b> - {order.get('type', 'N/A')}\n"
-            message += f"Ticket: {order.get('ticket', 'N/A')}\n"
+            message += f"Ticket: <code>{order.get('ticket', 'N/A')}</code>\n"
             message += f"Volume: {order.get('volume', 0)}\n"
             message += f"Price: {order.get('price_open', 0)}\n"
             message += f"Current: {order.get('price_current', 0)}\n"
@@ -553,7 +553,7 @@ class TelegramNotifier:
         # Best/Worst Trades
         if best_trade:
             message += f"<b>🏆 Best Trade</b>\n"
-            message += f"Ticket: {best_trade.get('ticket', 'N/A')}\n"
+            message += f"Ticket: <code>{best_trade.get('ticket', 'N/A')}</code>\n"
             message += f"Symbol: {best_trade.get('symbol', 'N/A')} ({best_trade.get('type', 'N/A')})\n"
             message += f"Profit: 💰 {best_trade.get('profit', 0):.2f}\n"
             message += f"Volume: {best_trade.get('volume', 0)}\n"
@@ -566,7 +566,7 @@ class TelegramNotifier:
         
         if worst_trade:
             message += f"<b>📉 Worst Trade</b>\n"
-            message += f"Ticket: {worst_trade.get('ticket', 'N/A')}\n"
+            message += f"Ticket: <code>{worst_trade.get('ticket', 'N/A')}</code>\n"
             message += f"Symbol: {worst_trade.get('symbol', 'N/A')} ({worst_trade.get('type', 'N/A')})\n"
             message += f"Loss: 📉 {worst_trade.get('profit', 0):.2f}\n"
             message += f"Volume: {worst_trade.get('volume', 0)}\n"
@@ -745,14 +745,14 @@ class TelegramNotifier:
         
         if result.get('success'):
             message = f"✅ <b>Position Closed</b>\n\n"
-            message += f"Ticket: {result.get('ticket')}\n"
+            message += f"Ticket: <code>{result.get('ticket')}</code>\n"
             message += f"Symbol: {result.get('symbol')}\n"
             message += f"Volume: {result.get('volume')}\n"
             message += f"Price: {result.get('price')}\n"
             profit = result.get('profit', 0)
             profit_emoji = "💰" if profit >= 0 else "📉"
             message += f"Profit: {profit_emoji} {profit:.2f}\n"
-            message += f"Deal Ticket: {result.get('deal_ticket')}"
+            message += f"Deal Ticket: <code>{result.get('deal_ticket')}</code>"
         else:
             message = f"❌ <b>Failed to Close Position</b>\n\n"
             message += f"Error: {result.get('error', 'Unknown error')}"
@@ -838,7 +838,7 @@ class TelegramNotifier:
 
         if result.get('success'):
             message = f"✅ <b>Order Cancelled</b>\n\n"
-            message += f"Ticket: {result.get('ticket')}\n"
+            message += f"Ticket: <code>{result.get('ticket')}</code>\n"
             message += f"Symbol: {result.get('symbol')}\n"
             message += f"Volume: {result.get('volume')}\n"
             message += f"Price: {result.get('price')}"
@@ -900,7 +900,7 @@ class TelegramNotifier:
         
         if result.get('success'):
             message = f"✅ <b>Position Modified</b>\n\n"
-            message += f"Ticket: {result.get('ticket')}\n"
+            message += f"Ticket: <code>{result.get('ticket')}</code>\n"
             message += f"Symbol: {result.get('symbol')}\n"
             if result.get('sl') is not None:
                 message += f"Stop Loss: {result.get('sl')}\n"
@@ -941,7 +941,7 @@ class TelegramNotifier:
         
         if result.get('success'):
             message = f"✅ <b>Position Partially Closed</b>\n\n"
-            message += f"Ticket: {result.get('ticket')}\n"
+            message += f"Ticket: <code>{result.get('ticket')}</code>\n"
             message += f"Symbol: {result.get('symbol')}\n"
             message += f"Volume Closed: {result.get('volume_closed')}\n"
             message += f"Volume Remaining: {result.get('volume_remaining')}\n"
@@ -949,7 +949,7 @@ class TelegramNotifier:
             profit = result.get('profit', 0)
             profit_emoji = "💰" if profit >= 0 else "📉"
             message += f"Profit: {profit_emoji} {profit:.2f}\n"
-            message += f"Deal Ticket: {result.get('deal_ticket')}"
+            message += f"Deal Ticket: <code>{result.get('deal_ticket')}</code>"
         else:
             message = f"❌ <b>Failed to Partially Close Position</b>\n\n"
             message += f"Error: {result.get('error', 'Unknown error')}"
@@ -981,7 +981,7 @@ class TelegramNotifier:
         if result.get('success'):
             message = (
                 f"✅ <b>Break-Even Set</b>\n\n"
-                f"Ticket: {result.get('ticket')}\n"
+                f"Ticket: <code>{result.get('ticket')}</code>\n"
                 f"Symbol: {result.get('symbol')}\n"
                 f"SL moved to entry: {result.get('entry_price')}"
             )
@@ -1024,7 +1024,7 @@ class TelegramNotifier:
         if context.args[1].lower() == 'off':
             self.alert_service.remove_trailing_stop(ticket)
             await update.message.reply_text(
-                f"✅ <b>Trailing Stop Disabled</b>\n\nTicket: {ticket}",
+                f"✅ <b>Trailing Stop Disabled</b>\n\nTicket: <code>{ticket}</code>",
                 parse_mode='HTML'
             )
             return
@@ -1068,7 +1068,7 @@ class TelegramNotifier:
 
         message = (
             f"✅ <b>Trailing Stop Active</b>\n\n"
-            f"Ticket: {ticket}\n"
+            f"Ticket: <code>{ticket}</code>\n"
             f"Symbol: {pos.symbol}\n"
             f"Trail Distance: {distance}\n"
             f"Initial SL: {initial_sl}\n"
@@ -1158,11 +1158,11 @@ class TelegramNotifier:
                 trade = self.trade_db.get_trade(ticket)
                 if trade:
                     message = f"✅ <b>Note Added</b>\n\n"
-                    message += f"Ticket: {ticket}\n"
+                    message += f"Ticket: <code>{ticket}</code>\n"
                     message += f"Symbol: {trade.get('symbol', 'N/A')}\n"
                     message += f"Note: {note}"
                 else:
-                    message = f"✅ Note added to trade {ticket}\n\nNote: {note}"
+                    message = f"✅ Note added to trade <code>{ticket}</code>\n\nNote: {note}"
             else:
                 message = f"❌ Trade {ticket} not found in history."
             
@@ -1280,7 +1280,7 @@ class TelegramNotifier:
                 time_close = time_close[:10]  # Just date
             
             message += f"{i}. <b>{trade.get('symbol', 'N/A')}</b> {trade.get('type', 'N/A')}\n"
-            message += f"   Ticket: {trade.get('ticket')} | {profit_emoji} {profit:.2f}\n"
+            message += f"   Ticket: <code>{trade.get('ticket')}</code> | {profit_emoji} {profit:.2f}\n"
             message += f"   {time_close}\n\n"
         
         message += f"<b>Total P/L: {total_profit:.2f}</b>"
@@ -1460,7 +1460,7 @@ class TelegramNotifier:
         
         message = f"{emoji} <b>Position Size Warning</b>\n\n"
         message += f"Symbol: {alert.get('symbol', 'N/A')}\n"
-        message += f"Ticket: {alert.get('ticket', 'N/A')}\n"
+        message += f"Ticket: <code>{alert.get('ticket', 'N/A')}</code>\n"
         message += f"Volume: {alert.get('volume', 0)}\n\n"
         message += f"Position Size: {alert.get('position_size_pct', 0):.2f}% of account\n"
         message += f"Maximum Allowed: {alert.get('max_size_pct', 0):.2f}%\n"
