@@ -650,11 +650,11 @@ class TelegramNotifier:
     def format_news_alert(self, event: dict) -> str:
         """Format an economic calendar event for a Telegram alert."""
         impact = event.get('impact', 'N/A')
-        title = event.get('title', 'N/A')
-        country = event.get('country', 'N/A')
+        title = html.escape(event.get('title', 'N/A'))
+        country = html.escape(event.get('country', 'N/A'))
         minutes_until = event.get('minutes_until', 0)
-        forecast = event.get('forecast', '')
-        previous = event.get('previous', '')
+        forecast = html.escape(event.get('forecast', ''))
+        previous = html.escape(event.get('previous', ''))
 
         impact_emoji = {'High': '🔴', 'Medium': '🟡', 'Low': '🟢'}.get(impact, '⚪')
 
@@ -1374,16 +1374,17 @@ class TelegramNotifier:
         try:
             ticket = int(context.args[0])
             note = ' '.join(context.args[1:])
-            
+            note_escaped = html.escape(note)
+
             if self.trade_db.add_trade_note(ticket, note):
                 trade = self.trade_db.get_trade(ticket)
                 if trade:
                     message = f"✅ <b>Note Added</b>\n\n"
                     message += f"Ticket: <code>{ticket}</code>\n"
                     message += f"Symbol: {trade.get('symbol', 'N/A')}\n"
-                    message += f"Note: {note}"
+                    message += f"Note: {note_escaped}"
                 else:
-                    message = f"✅ Note added to trade <code>{ticket}</code>\n\nNote: {note}"
+                    message = f"✅ Note added to trade <code>{ticket}</code>\n\nNote: {note_escaped}"
             else:
                 message = f"❌ Trade {ticket} not found in history."
             
