@@ -596,6 +596,8 @@ class TelegramNotifier:
         message += "<b>⚡ Trading Commands:</b>\n"
         message += "/close &lt;ticket&gt; - Close specific position\n"
         message += "/closeall - Close all open positions\n"
+        message += "/closeallorders - Cancel all pending orders\n"
+        message += "/cancelorder &lt;ticket&gt; - Cancel a specific pending order\n"
         message += "/modify &lt;ticket&gt; [sl] [tp] - Modify stop loss/take profit\n"
         message += "  Example: /modify 123456 1.1000 1.1100\n"
         message += "  Use 0 to remove SL/TP\n"
@@ -748,27 +750,83 @@ class TelegramNotifier:
             return
         
         result = self.mt5_monitor.close_all_positions()
-        
-        if result.get('success'):
+
+        if result.get('closed_count', 0) > 0 or result.get('total_positions', 0) > 0:
             message = f"✅ <b>Close All Positions</b>\n\n"
-            message += f"Closed: {result.get('closed_count')} positions\n"
-            message += f"Failed: {result.get('failed_count')} positions\n"
-            message += f"Total: {result.get('total_positions')} positions\n"
+            message += f"Closed: {result.get('closed_count', 0)} positions\n"
+            if result.get('failed_count', 0) > 0:
+                message += f"Failed: {result.get('failed_count', 0)} positions\n"
             total_profit = result.get('total_profit', 0)
             profit_emoji = "💰" if total_profit >= 0 else "📉"
             message += f"\nTotal Profit: {profit_emoji} {total_profit:.2f}"
-            
             if result.get('errors'):
                 message += f"\n\n⚠️ <b>Errors:</b>\n"
-                for error in result.get('errors', [])[:5]:  # Show first 5 errors
+                for error in result.get('errors', [])[:5]:
                     message += f"• {error}\n"
-                if len(result.get('errors', [])) > 5:
-                    message += f"... and {len(result.get('errors', [])) - 5} more"
         else:
-            message = f"ℹ️ {result.get('message', 'No positions to close')}"
-        
+            message = f"ℹ️ {result.get('message', 'No open positions to close')}"
+
         await update.message.reply_text(message, parse_mode='HTML')
-    
+
+    async def handle_closeallorders(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /closeallorders command - cancel all pending orders"""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+
+        if not self.mt5_monitor:
+            await update.message.reply_text("❌ MT5 monitor not available.")
+            return
+
+        result = self.mt5_monitor.cancel_all_orders()
+
+        if result.get('cancelled_count', 0) > 0 or result.get('total_orders', 0) > 0:
+            message = f"✅ <b>Cancel All Pending Orders</b>\n\n"
+            message += f"Cancelled: {result.get('cancelled_count', 0)} orders\n"
+            if result.get('failed_count', 0) > 0:
+                message += f"Failed: {result.get('failed_count', 0)} orders\n"
+            if result.get('errors'):
+                message += f"\n⚠️ <b>Errors:</b>\n"
+                for error in result.get('errors', [])[:5]:
+                    message += f"• {error}\n"
+        else:
+            message = f"ℹ️ {result.get('message', 'No pending orders to cancel')}"
+
+        await update.message.reply_text(message, parse_mode='HTML')
+
+    async def handle_cancelorder(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /cancelorder <ticket> command"""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+
+        if not self.mt5_monitor:
+            await update.message.reply_text("❌ MT5 monitor not available.")
+            return
+
+        if not context.args or len(context.args) < 1:
+            await update.message.reply_text("❌ Usage: /cancelorder <ticket>\n\nExample: /cancelorder 123456")
+            return
+
+        try:
+            ticket = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("❌ Invalid ticket number.")
+            return
+
+        result = self.mt5_monitor.cancel_order(ticket)
+
+        if result.get('success'):
+            message = f"✅ <b>Order Cancelled</b>\n\n"
+            message += f"Ticket: {result.get('ticket')}\n"
+            message += f"Symbol: {result.get('symbol')}\n"
+            message += f"Volume: {result.get('volume')}\n"
+            message += f"Price: {result.get('price')}"
+        else:
+            message = f"❌ {result.get('error', 'Failed to cancel order')}"
+
+        await update.message.reply_text(message, parse_mode='HTML')
+
     async def handle_modify(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /modify <ticket> <sl> <tp> command"""
         if not self._check_authorized(update):
@@ -1209,6 +1267,8 @@ class TelegramNotifier:
             self.application.add_handler(CommandHandler("summary", self.handle_summary))
             self.application.add_handler(CommandHandler("close", self.handle_close))
             self.application.add_handler(CommandHandler("closeall", self.handle_closeall))
+            self.application.add_handler(CommandHandler("closeallorders", self.handle_closeallorders))
+            self.application.add_handler(CommandHandler("cancelorder", self.handle_cancelorder))
             self.application.add_handler(CommandHandler("modify", self.handle_modify))
             self.application.add_handler(CommandHandler("partial", self.handle_partial))
             self.application.add_handler(CommandHandler("chart", self.handle_chart))

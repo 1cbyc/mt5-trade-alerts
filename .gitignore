@@ -40,3 +40,5 @@ data/*.json
 # Setup scripts (not needed in repo)
 *.ps1
 *.bat
+python-installer.exe
+.claude/settings.local.json
