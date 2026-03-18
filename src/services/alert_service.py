@@ -852,7 +852,7 @@ class MT5AlertService:
                     logger.info(f"Auto break-even applied: ticket {ticket} ({pos.symbol})")
                     message = (
                         f"🔒 <b>Auto Break-Even Applied</b>\n\n"
-                        f"Ticket: {ticket}\n"
+                        f"Ticket: <code>{ticket}</code>\n"
                         f"Symbol: {pos.symbol}\n"
                         f"Entry: {pos.price_open}\n"
                         f"Current: {pos.price_current:.{symbol_info.digits}f}\n"
