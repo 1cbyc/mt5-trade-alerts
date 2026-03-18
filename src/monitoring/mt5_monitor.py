@@ -422,7 +422,7 @@ class MT5Monitor:
             return {'support': [], 'resistance': []}
         
         # Get historical data
-        rates = mt5.copy_rates_from(symbol, timeframe, 0, periods)
+        rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, periods)
         if rates is None or len(rates) == 0:
             logger.warning(f"Could not retrieve historical data for {symbol}")
             return {'support': [], 'resistance': []}
