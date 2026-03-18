@@ -679,7 +679,7 @@ class MT5AlertService:
                 return False
         
         # Handle grouping (only for text-only, non-critical alerts)
-        if self.config.ENABLE_ALERT_GROUPING and use_grouping and priority != 'critical' and not image_data:
+        if self.config.ENABLE_ALERT_GROUPING and use_grouping and priority == 'normal' and not image_data:
             should_send_batch = self.alert_grouper.add_alert(alert_type, {'message': message})
             
             if should_send_batch:
