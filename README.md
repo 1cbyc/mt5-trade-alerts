@@ -17,6 +17,9 @@ Get real-time Telegram alerts for your MetaTrader 5 trades, orders, and price le
 - **Trade Journal**: Add notes to trades for later review
 - **CSV Export**: Export trade data for external analysis
 - **Multiple Accounts**: Run separate bot instances for multiple MT5 accounts simultaneously
+- **Break-Even Automation**: Move stop loss to entry price manually or automatically when profit threshold is hit
+- **Trailing Stops**: Software trailing stop that follows price and updates SL automatically
+- **Economic Calendar**: Auto-alerts before high-impact news events, plus `/news` command to view the week ahead
 
 ## How it works
 
@@ -359,6 +362,26 @@ View ML-learned trading insights and patterns including win rate, average profit
 #### `/volatility <symbol>`
 View volatility metrics and position sizing suggestions based on ATR and standard deviation.
 
+#### `/news`
+
+View today's medium and high-impact economic events. Automatically filtered to currencies relevant to your open positions.
+
+```
+/news                    # Today's events (auto-detected currencies)
+/news week               # Full week calendar
+/news USD EUR            # Filter by specific currencies
+/news USD week           # Full week for USD events
+```
+
+The bot also sends automatic alerts 15 minutes before any high-impact event that affects your monitored symbols. Configure in `config.env`:
+
+```env
+ENABLE_NEWS_ALERTS=true
+NEWS_MIN_IMPACT=High          # Low, Medium, or High
+NEWS_ALERT_ADVANCE_MINUTES=15
+NEWS_CURRENCIES=              # Leave empty to auto-detect from positions/symbols
+```
+
 ### Help
 
 #### `/help` or `/start`
@@ -372,7 +395,7 @@ Show the complete list of available commands.
 | Trade Management | `/close`, `/closeall`, `/modify`, `/partial`, `/breakeven`, `/trail` |
 | Order Management | `/closeallorders`, `/cancelorder` |
 | Analytics | `/chart`, `/history`, `/note`, `/export` |
-| Smart Features | `/mlinsights`, `/volatility` |
+| Smart Features | `/mlinsights`, `/volatility`, `/news` |
 | Help | `/help`, `/start` |
 
 ## Project Structure
