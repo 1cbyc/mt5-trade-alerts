@@ -279,6 +279,32 @@ Partially close a position.
 /partial 12345678 0.5
 ```
 
+#### `/breakeven <ticket>`
+Move the stop loss to the entry price (break-even) for a position.
+
+```
+/breakeven 12345678
+```
+
+#### `/trail <ticket> <distance>`
+
+Enable a software trailing stop on a position. The stop loss follows price as it moves in your favour, maintaining the specified distance.
+
+**Parameters:**
+
+- `ticket`: Position ticket number
+- `distance`: Trail distance in price units (e.g. `2.0` for gold = $2.00, `0.0010` for EURUSD = 10 pips)
+- Use `off` instead of a distance to disable trailing
+
+**Examples:**
+
+```
+/trail 12345678 2.0          # Gold: $2 trailing stop
+/trail 12345678 0.0010       # Forex: 10 pips trailing stop
+/trail 12345678 10           # Index: 10 point trailing stop
+/trail 12345678 off          # Disable trailing stop
+```
+
 ### Analytics & History Commands
 
 #### `/chart [type] [days]`
@@ -343,7 +369,7 @@ Show the complete list of available commands.
 | Category | Commands |
 |----------|----------|
 | Account Info | `/status`, `/positions`, `/orders`, `/summary` |
-| Trade Management | `/close`, `/closeall`, `/modify`, `/partial` |
+| Trade Management | `/close`, `/closeall`, `/modify`, `/partial`, `/breakeven`, `/trail` |
 | Order Management | `/closeallorders`, `/cancelorder` |
 | Analytics | `/chart`, `/history`, `/note`, `/export` |
 | Smart Features | `/mlinsights`, `/volatility` |

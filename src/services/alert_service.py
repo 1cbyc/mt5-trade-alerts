@@ -45,6 +45,8 @@ class MT5AlertService:
         self.initial_balance = None  # Track initial balance for drawdown calculation
         self.last_daily_summary_date = None  # Track last date daily summary was sent
         self.last_dynamic_levels_update = None  # Track last dynamic levels update time
+        self.breakeven_applied = set()  # Tickets that have had auto break-even applied
+        self.trailing_stops = {}  # {ticket: distance_price_units} for software trailing stops
 
         # Enhanced monitoring
         self.rate_limiter = AlertRateLimiter(
@@ -199,7 +201,8 @@ class MT5AlertService:
             self.telegram.ml_analyzer = self.ml_analyzer
         if self.volatility_calc:
             self.telegram.volatility_calc = self.volatility_calc
-        
+        self.telegram.alert_service = self
+
         # Setup command handlers
         await self.telegram.setup_commands()
         
@@ -771,6 +774,111 @@ class MT5AlertService:
         
         return message
     
+    def set_trailing_stop(self, ticket: int, distance: float):
+        """Register a position for software trailing stop management."""
+        self.trailing_stops[ticket] = distance
+
+    def remove_trailing_stop(self, ticket: int):
+        """Remove trailing stop for a position."""
+        self.trailing_stops.pop(ticket, None)
+
+    async def check_auto_breakeven(self):
+        """Auto-move SL to entry price when profit in pips hits AUTO_BREAKEVEN_PIPS threshold."""
+        if not self.config.ENABLE_AUTO_BREAKEVEN:
+            return
+        if not self.mt5_monitor or not self.mt5_monitor.connected:
+            return
+
+        import MetaTrader5 as mt5
+        positions = mt5.positions_get()
+        if not positions:
+            return
+
+        for pos in positions:
+            ticket = pos.ticket
+            if ticket in self.breakeven_applied:
+                continue
+
+            # Skip if SL is already at or better than entry
+            if pos.sl > 0:
+                if pos.type == mt5.ORDER_TYPE_BUY and pos.sl >= pos.price_open:
+                    self.breakeven_applied.add(ticket)
+                    continue
+                if pos.type == mt5.ORDER_TYPE_SELL and pos.sl <= pos.price_open:
+                    self.breakeven_applied.add(ticket)
+                    continue
+
+            symbol_info = mt5.symbol_info(pos.symbol)
+            if not symbol_info or symbol_info.point <= 0:
+                continue
+
+            pip_size = symbol_info.point * 10 if symbol_info.digits >= 4 else symbol_info.point
+
+            if pos.type == mt5.ORDER_TYPE_BUY:
+                profit_pips = (pos.price_current - pos.price_open) / pip_size
+            else:
+                profit_pips = (pos.price_open - pos.price_current) / pip_size
+
+            if profit_pips >= self.config.AUTO_BREAKEVEN_PIPS:
+                result = self.mt5_monitor.set_breakeven(ticket)
+                if result.get('success'):
+                    self.breakeven_applied.add(ticket)
+                    logger.info(f"Auto break-even applied: ticket {ticket} ({pos.symbol})")
+                    message = (
+                        f"🔒 <b>Auto Break-Even Applied</b>\n\n"
+                        f"Ticket: {ticket}\n"
+                        f"Symbol: {pos.symbol}\n"
+                        f"Entry: {pos.price_open}\n"
+                        f"Current: {pos.price_current:.{symbol_info.digits}f}\n"
+                        f"Profit: {pos.profit:.2f}\n"
+                        f"SL moved to entry price"
+                    )
+                    await self._send_alert_safe(message, alert_type='trade', priority='important')
+
+    async def check_trailing_stops(self):
+        """Update SL for all positions registered for trailing stop management."""
+        if not self.trailing_stops:
+            return
+        if not self.mt5_monitor or not self.mt5_monitor.connected:
+            return
+
+        import MetaTrader5 as mt5
+        closed_tickets = []
+
+        for ticket, distance in list(self.trailing_stops.items()):
+            position = mt5.positions_get(ticket=ticket)
+            if not position or len(position) == 0:
+                closed_tickets.append(ticket)
+                continue
+
+            pos = position[0]
+            symbol_info = mt5.symbol_info(pos.symbol)
+            if not symbol_info:
+                continue
+
+            tick = mt5.symbol_info_tick(pos.symbol)
+            if not tick:
+                continue
+
+            digits = symbol_info.digits
+
+            if pos.type == mt5.ORDER_TYPE_BUY:
+                ideal_sl = round(tick.bid - distance, digits)
+                if ideal_sl > 0 and ideal_sl > pos.sl:
+                    result = self.mt5_monitor.modify_position(ticket, sl=ideal_sl, tp=None)
+                    if result.get('success'):
+                        logger.debug(f"Trailing stop updated: ticket {ticket} SL={ideal_sl}")
+            else:
+                ideal_sl = round(tick.ask + distance, digits)
+                if pos.sl == 0 or ideal_sl < pos.sl:
+                    result = self.mt5_monitor.modify_position(ticket, sl=ideal_sl, tp=None)
+                    if result.get('success'):
+                        logger.debug(f"Trailing stop updated: ticket {ticket} SL={ideal_sl}")
+
+        for ticket in closed_tickets:
+            del self.trailing_stops[ticket]
+            logger.info(f"Trailing stop removed for closed position {ticket}")
+
     async def check_daily_summary(self):
         """Check if it's time to send daily performance summary"""
         if not self.config.ENABLE_DAILY_SUMMARY:
@@ -919,6 +1027,13 @@ class MT5AlertService:
                 # Check profit suggestions (every 3 cycles = ~15 seconds)
                 if check_counter % 3 == 0:
                     await self.check_profit_suggestions()
+
+                # Check auto break-even (every 3 cycles = ~15 seconds)
+                if check_counter % 3 == 0:
+                    await self.check_auto_breakeven()
+
+                # Update trailing stops (every cycle)
+                await self.check_trailing_stops()
                 
                 # Check volatility position sizing (every 5 cycles = ~25 seconds)
                 if check_counter % 5 == 0:

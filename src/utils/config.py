@@ -43,6 +43,10 @@ class Config:
         self.MIN_PROFIT_FOR_SUGGESTION = float(os.getenv('MIN_PROFIT_FOR_SUGGESTION', '10.0'))
         self.PROFIT_PERCENTAGE_THRESHOLD = float(os.getenv('PROFIT_PERCENTAGE_THRESHOLD', '5.0'))
 
+        # Auto Break-Even Settings
+        self.ENABLE_AUTO_BREAKEVEN = os.getenv('ENABLE_AUTO_BREAKEVEN', 'false').lower() == 'true'
+        self.AUTO_BREAKEVEN_PIPS = float(os.getenv('AUTO_BREAKEVEN_PIPS', '20.0'))
+
         # Risk Management Alerts
         self.ENABLE_RISK_ALERTS = os.getenv('ENABLE_RISK_ALERTS', 'true').lower() == 'true'
         self.MARGIN_LEVEL_WARNING = float(os.getenv('MARGIN_LEVEL_WARNING', '150.0'))

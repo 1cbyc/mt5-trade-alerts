@@ -21,6 +21,7 @@ class TelegramNotifier:
         self.mt5_monitor = None  # Will be set by main service
         self.trade_db = None  # Will be set by main service
         self.chart_generator = None  # Will be set by main service
+        self.alert_service = None  # Will be set by main service
     
     async def send_message(self, message: str, priority: AlertPriority = AlertPriority.NORMAL) -> bool:
         """Send a message to Telegram with priority formatting"""
@@ -616,7 +617,12 @@ class TelegramNotifier:
         message += "  Example: /modify 123456 1.1000 1.1100\n"
         message += "  Use 0 to remove SL/TP\n"
         message += "/partial &lt;ticket&gt; &lt;volume&gt; - Partially close position\n"
-        message += "  Example: /partial 123456 0.5\n\n"
+        message += "  Example: /partial 123456 0.5\n"
+        message += "/breakeven &lt;ticket&gt; - Move SL to entry price\n"
+        message += "  Example: /breakeven 123456\n"
+        message += "/trail &lt;ticket&gt; &lt;distance&gt; - Set trailing stop (price units)\n"
+        message += "  Example: /trail 123456 2.0 (gold $2 trail)\n"
+        message += "  /trail 123456 off — disable trailing stop\n\n"
         message += "<b>📊 Analytics Commands:</b>\n"
         message += "/chart [type] [days] - Generate performance charts\n"
         message += "  Types: summary, equity, daily, distribution\n"
@@ -950,6 +956,126 @@ class TelegramNotifier:
         
         await update.message.reply_text(message, parse_mode='HTML')
     
+    async def handle_breakeven(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /breakeven <ticket> — move SL to entry price"""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+
+        if not self.mt5_monitor:
+            await update.message.reply_text("❌ MT5 monitor not available.")
+            return
+
+        if not context.args or len(context.args) < 1:
+            await update.message.reply_text("❌ Usage: /breakeven <ticket>\nExample: /breakeven 123456")
+            return
+
+        try:
+            ticket = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("❌ Invalid ticket number.")
+            return
+
+        result = self.mt5_monitor.set_breakeven(ticket)
+
+        if result.get('success'):
+            message = (
+                f"✅ <b>Break-Even Set</b>\n\n"
+                f"Ticket: {result.get('ticket')}\n"
+                f"Symbol: {result.get('symbol')}\n"
+                f"SL moved to entry: {result.get('entry_price')}"
+            )
+        else:
+            message = f"❌ <b>Break-Even Failed</b>\n\nError: {result.get('error', 'Unknown error')}"
+
+        await update.message.reply_text(message, parse_mode='HTML')
+
+    async def handle_trail(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /trail <ticket> <distance> or /trail <ticket> off"""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+
+        if not self.mt5_monitor:
+            await update.message.reply_text("❌ MT5 monitor not available.")
+            return
+
+        if not self.alert_service:
+            await update.message.reply_text("❌ Alert service not available.")
+            return
+
+        if not context.args or len(context.args) < 2:
+            await update.message.reply_text(
+                "❌ Usage: /trail <ticket> <distance>\n"
+                "  distance = price distance (e.g. 2.0 for gold = $2 trail, 0.0010 for forex = 10 pips)\n"
+                "  /trail <ticket> off — disable trailing stop\n\n"
+                "Examples:\n"
+                "/trail 123456 2.0\n"
+                "/trail 123456 off"
+            )
+            return
+
+        try:
+            ticket = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("❌ Invalid ticket number.")
+            return
+
+        if context.args[1].lower() == 'off':
+            self.alert_service.remove_trailing_stop(ticket)
+            await update.message.reply_text(
+                f"✅ <b>Trailing Stop Disabled</b>\n\nTicket: {ticket}",
+                parse_mode='HTML'
+            )
+            return
+
+        try:
+            distance = float(context.args[1])
+            if distance <= 0:
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text("❌ Distance must be a positive number.\nExample: /trail 123456 2.0")
+            return
+
+        import MetaTrader5 as mt5
+        position = mt5.positions_get(ticket=ticket)
+        if not position or len(position) == 0:
+            await update.message.reply_text(f"❌ Position {ticket} not found.")
+            return
+
+        pos = position[0]
+        symbol_info = mt5.symbol_info(pos.symbol)
+        digits = symbol_info.digits if symbol_info else 5
+
+        tick = mt5.symbol_info_tick(pos.symbol)
+        current_price = (tick.bid if tick else pos.price_current) if pos.type == mt5.ORDER_TYPE_BUY else (tick.ask if tick else pos.price_current)
+
+        if pos.type == mt5.ORDER_TYPE_BUY:
+            initial_sl = round(current_price - distance, digits)
+        else:
+            initial_sl = round(current_price + distance, digits)
+
+        if initial_sl > 0:
+            sl_result = self.mt5_monitor.modify_position(ticket, sl=initial_sl, tp=None)
+            if not sl_result.get('success') and 'already' not in sl_result.get('error', '').lower():
+                await update.message.reply_text(
+                    f"❌ <b>Failed to set initial trailing SL</b>\n\nError: {sl_result.get('error', 'Unknown')}",
+                    parse_mode='HTML'
+                )
+                return
+
+        self.alert_service.set_trailing_stop(ticket, distance)
+
+        message = (
+            f"✅ <b>Trailing Stop Active</b>\n\n"
+            f"Ticket: {ticket}\n"
+            f"Symbol: {pos.symbol}\n"
+            f"Trail Distance: {distance}\n"
+            f"Initial SL: {initial_sl}\n"
+            f"SL will update automatically as price moves in your favour."
+        )
+        await update.message.reply_text(message, parse_mode='HTML')
+
     async def handle_chart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /chart command - Generate and send performance charts"""
         if not self._check_authorized(update):
@@ -1285,6 +1411,8 @@ class TelegramNotifier:
             self.application.add_handler(CommandHandler("cancelorder", self.handle_cancelorder))
             self.application.add_handler(CommandHandler("modify", self.handle_modify))
             self.application.add_handler(CommandHandler("partial", self.handle_partial))
+            self.application.add_handler(CommandHandler("breakeven", self.handle_breakeven))
+            self.application.add_handler(CommandHandler("trail", self.handle_trail))
             self.application.add_handler(CommandHandler("chart", self.handle_chart))
             self.application.add_handler(CommandHandler("note", self.handle_note))
             self.application.add_handler(CommandHandler("export", self.handle_export))
