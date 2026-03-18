@@ -337,9 +337,23 @@ class TelegramNotifier:
         message = self.format_pending_order_alert(alert)
         return await self.send_message(message)
     
-    async def send_test_message(self) -> bool:
-        """Send a test message to verify connection"""
-        message = "🤖 <b>MT5 Trade Alerts Bot</b>\n\nBot is connected and ready!"
+    async def send_startup_message(self, account_info: dict = None, account_label: str = '') -> bool:
+        """Send startup message with account info"""
+        label_line = f" — <b>{account_label}</b>" if account_label else ""
+        message = f"🤖 <b>MT5 Trade Alerts{label_line}</b>\n"
+        message += "━━━━━━━━━━━━━━━━━━━━\n"
+        message += "✅ Bot started &amp; connected\n\n"
+
+        if account_info:
+            message += f"👤 <b>Account:</b> {account_info.get('login', 'N/A')}\n"
+            message += f"🏦 <b>Server:</b> {account_info.get('server', 'N/A')}\n"
+            message += f"💰 <b>Balance:</b> {account_info.get('balance', 0):.2f} {account_info.get('currency', '')}\n"
+            message += f"📊 <b>Equity:</b> {account_info.get('equity', 0):.2f} {account_info.get('currency', '')}\n"
+            leverage = account_info.get('leverage', 0)
+            if leverage:
+                message += f"⚡ <b>Leverage:</b> 1:{leverage}\n"
+
+        message += "\nSend /help for all commands."
         return await self.send_message(message)
     
     def set_mt5_monitor(self, mt5_monitor):

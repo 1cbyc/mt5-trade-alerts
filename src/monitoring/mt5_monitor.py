@@ -21,20 +21,22 @@ class MT5Monitor:
         
     def connect(self) -> bool:
         """Initialize and connect to MT5 terminal"""
+        init_kwargs = dict(login=self.login, password=self.password, server=self.server)
         if self.path:
-            if not mt5.initialize(path=self.path):
-                logger.error(f"MT5 initialization failed: {mt5.last_error()}")
-                return False
-        else:
-            if not mt5.initialize():
-                logger.error(f"MT5 initialization failed: {mt5.last_error()}")
-                return False
-        
-        authorized = mt5.login(self.login, password=self.password, server=self.server)
-        if not authorized:
-            logger.error(f"MT5 login failed: {mt5.last_error()}")
-            mt5.shutdown()
+            init_kwargs['path'] = self.path
+
+        if not mt5.initialize(**init_kwargs):
+            logger.error(f"MT5 initialization failed: {mt5.last_error()}")
             return False
+
+        # Verify we are logged into the correct account
+        info = mt5.account_info()
+        if info is None or info.login != self.login:
+            authorized = mt5.login(self.login, password=self.password, server=self.server)
+            if not authorized:
+                logger.error(f"MT5 login failed: {mt5.last_error()}")
+                mt5.shutdown()
+                return False
         
         self.connected = True
         account_info = mt5.account_info()

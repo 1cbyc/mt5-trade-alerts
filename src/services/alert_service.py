@@ -203,8 +203,9 @@ class MT5AlertService:
         # Setup command handlers
         await self.telegram.setup_commands()
         
-        # Send test message
-        if await self.telegram.send_test_message():
+        # Send startup message with account info
+        account_info = self.mt5_monitor.get_account_info()
+        if await self.telegram.send_startup_message(account_info, self.config.ACCOUNT_LABEL):
             logger.info("Telegram bot connected successfully")
         else:
             logger.warning("Telegram bot connection test failed, but continuing...")
