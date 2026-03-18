@@ -712,6 +712,65 @@ class MT5Monitor:
         
         return result
     
+    def analyze_grid_dca(self, symbol: str = None) -> List[Dict]:
+        """
+        Group open positions by symbol and direction, returning a summary for each
+        group that has 2 or more positions (grid or DCA scenario).
+
+        Args:
+            symbol: If provided, only analyse that symbol. Otherwise analyse all.
+
+        Returns:
+            List of group summary dicts.  Each dict has:
+            symbol, direction, count, total_volume, avg_entry, current_price,
+            total_profit, positions (list of ticket dicts)
+        """
+        if not self.connected:
+            return []
+
+        positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
+        if not positions:
+            return []
+
+        # Group by (symbol, direction)
+        groups: Dict[tuple, list] = {}
+        for pos in positions:
+            direction = 'BUY' if pos.type == mt5.ORDER_TYPE_BUY else 'SELL'
+            key = (pos.symbol, direction)
+            groups.setdefault(key, []).append(pos)
+
+        result = []
+        for (sym, direction), group in groups.items():
+            if len(group) < 2:
+                continue  # single position — not a grid/DCA
+
+            total_volume = sum(p.volume for p in group)
+            total_profit = sum(p.profit for p in group)
+            # weighted average entry price
+            avg_entry = sum(p.price_open * p.volume for p in group) / total_volume
+
+            symbol_info = mt5.symbol_info(sym)
+            digits = symbol_info.digits if symbol_info else 5
+
+            current_price = group[0].price_current  # same symbol, same current price
+
+            result.append({
+                'symbol': sym,
+                'direction': direction,
+                'count': len(group),
+                'total_volume': round(total_volume, 2),
+                'avg_entry': round(avg_entry, digits),
+                'current_price': current_price,
+                'total_profit': round(total_profit, 2),
+                'positions': [
+                    {'ticket': p.ticket, 'volume': p.volume,
+                     'price_open': p.price_open, 'profit': round(p.profit, 2)}
+                    for p in sorted(group, key=lambda p: p.time)
+                ],
+            })
+
+        return result
+
     def get_all_orders(self) -> List[Dict]:
         """Get all pending orders"""
         if not self.connected:

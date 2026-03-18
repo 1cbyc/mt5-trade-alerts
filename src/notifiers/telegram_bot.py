@@ -1,6 +1,7 @@
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram.error import TelegramError
+import html
 import logging
 from typing import Optional, Callable
 from datetime import datetime, timedelta
@@ -22,6 +23,8 @@ class TelegramNotifier:
         self.trade_db = None  # Will be set by main service
         self.chart_generator = None  # Will be set by main service
         self.alert_service = None  # Will be set by main service
+        self.economic_calendar = None  # Will be set by main service
+        self.correlation_tracker = None  # Will be set by main service
     
     async def send_message(self, message: str, priority: AlertPriority = AlertPriority.NORMAL) -> bool:
         """Send a message to Telegram with priority formatting"""
@@ -598,6 +601,82 @@ class TelegramNotifier:
         message = self.format_daily_summary(stats)
         return await self.send_message(message)
     
+    def format_grid_dca_alert(self, group: dict, action: str = 'updated') -> str:
+        """Format a grid/DCA group update alert."""
+        symbol = group['symbol']
+        direction = group['direction']
+        count = group['count']
+        total_volume = group['total_volume']
+        avg_entry = group['avg_entry']
+        current_price = group['current_price']
+        total_profit = group['total_profit']
+
+        dir_emoji = '🟢' if direction == 'BUY' else '🔴'
+        profit_emoji = '💰' if total_profit >= 0 else '📉'
+
+        message = f"📊 <b>Grid/DCA Update — {symbol}</b>\n\n"
+        message += f"{dir_emoji} Direction: {direction} | Position {action}\n"
+        message += f"Positions: {count}\n"
+        message += f"Total Volume: {total_volume} lots\n"
+        message += f"Avg Entry: {avg_entry}\n"
+        message += f"Current Price: {current_price}\n"
+        message += f"Total P/L: {profit_emoji} {total_profit:.2f}\n\n"
+        message += "<b>Positions:</b>\n"
+        for pos in group['positions']:
+            p_emoji = '💰' if pos['profit'] >= 0 else '📉'
+            message += f"  <code>{pos['ticket']}</code>  {pos['volume']} lots @ {pos['price_open']}  {p_emoji} {pos['profit']:.2f}\n"
+        return message
+
+    def format_correlation_alert(self, alert: dict) -> str:
+        """Format a correlation divergence alert."""
+        sym_a = alert['symbol_a']
+        sym_b = alert['symbol_b']
+        corr = alert['correlation']
+        prev = alert.get('previous_correlation')
+        threshold = alert['threshold']
+        bars = alert['bars_analysed']
+
+        message = f"⚠️ <b>Correlation Divergence Alert</b>\n\n"
+        message += f"Pair: <b>{sym_a} / {sym_b}</b>\n"
+        message += f"Current Correlation: {corr:.3f}\n"
+        if prev is not None:
+            message += f"Previous Correlation: {prev:.3f}\n"
+        message += f"Alert Threshold: {threshold}\n"
+        message += f"Bars Analysed: {bars} (H1)\n\n"
+        message += "These symbols have diverged from their usual relationship.\n"
+        message += "Check your positions — one may be moving independently."
+        return message
+
+    def format_news_alert(self, event: dict) -> str:
+        """Format an economic calendar event for a Telegram alert."""
+        impact = event.get('impact', 'N/A')
+        title = event.get('title', 'N/A')
+        country = event.get('country', 'N/A')
+        minutes_until = event.get('minutes_until', 0)
+        forecast = event.get('forecast', '')
+        previous = event.get('previous', '')
+
+        impact_emoji = {'High': '🔴', 'Medium': '🟡', 'Low': '🟢'}.get(impact, '⚪')
+
+        if minutes_until <= 0:
+            timing = "happening now"
+        elif minutes_until == 1:
+            timing = "in 1 minute"
+        else:
+            timing = f"in {minutes_until} minutes"
+
+        message = f"📰 <b>Economic Event Alert</b>\n\n"
+        message += f"{impact_emoji} <b>{title}</b>\n"
+        message += f"Currency: {country}\n"
+        message += f"Impact: {impact}\n"
+        message += f"Time: ⏰ {timing}\n"
+        if forecast:
+            message += f"Forecast: {forecast}\n"
+        if previous:
+            message += f"Previous: {previous}\n"
+        message += f"\n⚠️ Consider managing open positions before this event."
+        return message
+
     def format_help(self) -> str:
         """Format help message for /help command"""
         message = "🤖 <b>MT5 Trade Alerts Bot - Commands</b>\n\n"
@@ -637,7 +716,13 @@ class TelegramNotifier:
         message += "/mlinsights [symbol] - Show ML trading insights\n"
         message += "  Example: /mlinsights EURUSD\n"
         message += "/volatility &lt;symbol&gt; - Show volatility and position sizing\n"
-        message += "  Example: /volatility EURUSD\n\n"
+        message += "  Example: /volatility EURUSD\n"
+        message += "/grid [symbol] - Show grid/DCA summary for multi-position symbols\n"
+        message += "  Example: /grid XAUUSD\n"
+        message += "/correlation - Show current correlation between configured pairs\n"
+        message += "/news - Today's medium/high-impact economic events\n"
+        message += "  /news week - Full week calendar\n"
+        message += "  /news USD EUR - Filter by currency\n\n"
         message += "/help - Show this help message\n\n"
         message += "<b>🔔 Automatic Alerts:</b>\n"
         message += "• New trades (open/close)\n"
@@ -1076,6 +1161,142 @@ class TelegramNotifier:
         )
         await update.message.reply_text(message, parse_mode='HTML')
 
+    async def handle_grid(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /grid [symbol] — show grid/DCA summary for multi-position symbols."""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+
+        if not self.mt5_monitor:
+            await update.message.reply_text("❌ MT5 monitor not available.")
+            return
+
+        symbol = context.args[0].upper() if context.args else None
+
+        groups = self.mt5_monitor.analyze_grid_dca(symbol=symbol)
+
+        if not groups:
+            msg = f"📊 No grid/DCA positions found{f' for {symbol}' if symbol else ''}."
+            await update.message.reply_text(msg)
+            return
+
+        for group in groups:
+            message = self.format_grid_dca_alert(group, action='open')
+            await update.message.reply_text(message, parse_mode='HTML')
+
+    async def handle_correlation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /correlation — show current correlation for all configured pairs."""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+
+        if not self.correlation_tracker:
+            await update.message.reply_text("❌ Correlation tracking is not enabled.\nSet ENABLE_CORRELATION_ALERTS=true in config.env.")
+            return
+
+        try:
+            results = self.correlation_tracker.get_all_correlations()
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error fetching correlations: {e}")
+            return
+
+        if not results:
+            await update.message.reply_text("📊 No correlation pairs configured.")
+            return
+
+        message = "📊 <b>Correlation Report</b>\n\n"
+        for r in results:
+            sym_a = r['symbol_a']
+            sym_b = r['symbol_b']
+            corr = r.get('correlation')
+            if corr is None:
+                message += f"<b>{sym_a} / {sym_b}</b>\n   ❌ {r.get('error', 'No data')}\n\n"
+                continue
+            bars = r.get('bars_analysed', '?')
+            if corr >= 0.7:
+                strength = "Strong 🟢"
+            elif corr >= 0.4:
+                strength = "Moderate 🟡"
+            elif corr >= 0:
+                strength = "Weak 🟠"
+            else:
+                strength = "Negative/Diverged 🔴"
+            message += f"<b>{sym_a} / {sym_b}</b>\n"
+            message += f"   Correlation: {corr:.3f}  ({strength})\n"
+            message += f"   Based on {bars} H1 bars\n\n"
+
+        await update.message.reply_text(message, parse_mode='HTML')
+
+    async def handle_news(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /news [currencies] [week] — show upcoming economic events."""
+        if not self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access.")
+            return
+
+        if not self.economic_calendar:
+            await update.message.reply_text("❌ Economic calendar is not enabled.")
+            return
+
+        # Parse optional args: currency filters and 'week' keyword
+        args = [a.upper() for a in (context.args or [])]
+        days_ahead = 7 if 'WEEK' in args else 1
+        currencies = [a for a in args if a != 'WEEK' and len(a) <= 4]
+
+        try:
+            from ..analytics.economic_calendar import get_currencies_from_symbols
+            if not currencies and self.mt5_monitor:
+                import MetaTrader5 as mt5
+                positions = mt5.positions_get() or []
+                orders = mt5.orders_get() or []
+                symbols = {p.symbol for p in positions} | {o.symbol for o in orders}
+                currencies = get_currencies_from_symbols(list(symbols))
+
+            events = self.economic_calendar.get_events_for_display(
+                currencies=currencies or None,
+                min_impact='Medium',
+                days_ahead=days_ahead,
+            )
+        except Exception as e:
+            await update.message.reply_text(f"❌ Could not fetch calendar: {e}")
+            return
+
+        label = "This Week" if days_ahead == 7 else "Today"
+        currency_label = f" ({', '.join(currencies)})" if currencies else ""
+
+        if not events:
+            await update.message.reply_text(
+                f"📰 <b>Economic Calendar — {label}{currency_label}</b>\n\nNo medium/high-impact events found.",
+                parse_mode='HTML'
+            )
+            return
+
+        message = f"📰 <b>Economic Calendar — {label}{currency_label}</b>\n\n"
+        for event in events:
+            impact = event.get('impact', '')
+            impact_emoji = {'High': '🔴', 'Medium': '🟡'}.get(impact, '🟢')
+            event_time = event.get('event_time_utc')
+            time_str = event_time.strftime('%a %d %b %H:%M UTC') if event_time else 'N/A'
+            title = html.escape(event.get('title', 'N/A'))
+            country = html.escape(event.get('country', 'N/A'))
+            forecast = html.escape(event.get('forecast', ''))
+            previous = html.escape(event.get('previous', ''))
+
+            message += f"{impact_emoji} <b>{title}</b> ({country})\n"
+            message += f"   🕐 {time_str}"
+            if forecast:
+                message += f"  F: {forecast}"
+            if previous:
+                message += f"  P: {previous}"
+            message += "\n\n"
+
+            # Telegram has a 4096 char limit — send in chunks if needed
+            if len(message) > 3500:
+                await update.message.reply_text(message, parse_mode='HTML')
+                message = ""
+
+        if message.strip():
+            await update.message.reply_text(message, parse_mode='HTML')
+
     async def handle_chart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /chart command - Generate and send performance charts"""
         if not self._check_authorized(update):
@@ -1413,6 +1634,9 @@ class TelegramNotifier:
             self.application.add_handler(CommandHandler("partial", self.handle_partial))
             self.application.add_handler(CommandHandler("breakeven", self.handle_breakeven))
             self.application.add_handler(CommandHandler("trail", self.handle_trail))
+            self.application.add_handler(CommandHandler("grid", self.handle_grid))
+            self.application.add_handler(CommandHandler("correlation", self.handle_correlation))
+            self.application.add_handler(CommandHandler("news", self.handle_news))
             self.application.add_handler(CommandHandler("chart", self.handle_chart))
             self.application.add_handler(CommandHandler("note", self.handle_note))
             self.application.add_handler(CommandHandler("export", self.handle_export))
