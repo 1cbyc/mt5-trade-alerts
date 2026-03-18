@@ -42,4 +42,3 @@ data/*.json
 *.bat
 python-installer.exe
 .claude/settings.local.json
-data/trade_history.db
