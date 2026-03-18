@@ -1,11 +1,13 @@
 """
 MT5 Trade Alerts - Main Entry Point
 """
+import argparse
 import asyncio
 import logging
 import signal
 import sys
 from src.services.alert_service import MT5AlertService
+from src.utils.config import Config
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,12 +30,19 @@ def signal_handler(service):
 
 
 async def main():
-    service = MT5AlertService()
-    
+    parser = argparse.ArgumentParser(description='MT5 Trade Alerts Bot')
+    parser.add_argument('--config', default='config.env', help='Path to config file (default: config.env)')
+    args = parser.parse_args()
+
+    logger.info(f"Loading config from: {args.config}")
+    config = Config(config_path=args.config)
+
+    service = MT5AlertService(config=config)
+
     # Setup signal handlers
     signal.signal(signal.SIGINT, signal_handler(service))
     signal.signal(signal.SIGTERM, signal_handler(service))
-    
+
     await service.run()
 
 

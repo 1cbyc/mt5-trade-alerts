@@ -32,7 +32,8 @@ logger = logging.getLogger(__name__)
 
 
 class MT5AlertService:
-    def __init__(self):
+    def __init__(self, config: Config = None):
+        self.config = config or Config()
         self.mt5_monitor = None
         self.telegram = None
         self.running = False
@@ -44,22 +45,22 @@ class MT5AlertService:
         self.initial_balance = None  # Track initial balance for drawdown calculation
         self.last_daily_summary_date = None  # Track last date daily summary was sent
         self.last_dynamic_levels_update = None  # Track last dynamic levels update time
-        
+
         # Enhanced monitoring
         self.rate_limiter = AlertRateLimiter(
-            max_alerts_per_minute=Config.MAX_ALERTS_PER_MINUTE,
-            max_alerts_per_hour=Config.MAX_ALERTS_PER_HOUR
+            max_alerts_per_minute=self.config.MAX_ALERTS_PER_MINUTE,
+            max_alerts_per_hour=self.config.MAX_ALERTS_PER_HOUR
         )
         self.alert_grouper = AlertGrouper(
-            batch_window_seconds=Config.ALERT_BATCH_WINDOW_SECONDS,
-            max_batch_size=Config.ALERT_BATCH_MAX_SIZE
+            batch_window_seconds=self.config.ALERT_BATCH_WINDOW_SECONDS,
+            max_batch_size=self.config.ALERT_BATCH_MAX_SIZE
         )
         self.quiet_hours = QuietHours(
-            enabled=Config.QUIET_HOURS_ENABLED,
-            start_hour=Config.QUIET_HOURS_START_HOUR,
-            start_minute=Config.QUIET_HOURS_START_MINUTE,
-            end_hour=Config.QUIET_HOURS_END_HOUR,
-            end_minute=Config.QUIET_HOURS_END_MINUTE
+            enabled=self.config.QUIET_HOURS_ENABLED,
+            start_hour=self.config.QUIET_HOURS_START_HOUR,
+            start_minute=self.config.QUIET_HOURS_START_MINUTE,
+            end_hour=self.config.QUIET_HOURS_END_HOUR,
+            end_minute=self.config.QUIET_HOURS_END_MINUTE
         )
         self.connection_health_checked = False
         self.last_connection_check = None
@@ -67,18 +68,18 @@ class MT5AlertService:
         
         # Trade history database
         self.trade_db = None
-        if Config.ENABLE_TRADE_HISTORY:
-            self.trade_db = TradeHistoryDB(db_path=Config.TRADE_HISTORY_DB_PATH)
+        if self.config.ENABLE_TRADE_HISTORY:
+            self.trade_db = TradeHistoryDB(db_path=self.config.TRADE_HISTORY_DB_PATH)
         
         # Chart generator
-        self.chart_generator = ChartGenerator() if Config.ENABLE_CHARTS else None
+        self.chart_generator = ChartGenerator() if self.config.ENABLE_CHARTS else None
         
         # ML Profit Analyzer
         self.ml_analyzer = None
-        if Config.ENABLE_ML_PROFIT_SUGGESTIONS and self.trade_db:
+        if self.config.ENABLE_ML_PROFIT_SUGGESTIONS and self.trade_db:
             self.ml_analyzer = MLProfitAnalyzer(
                 trade_db=self.trade_db,
-                min_trades_for_learning=Config.ML_MIN_TRADES_FOR_LEARNING
+                min_trades_for_learning=self.config.ML_MIN_TRADES_FOR_LEARNING
             )
             # Learn from history on startup
             try:
@@ -89,8 +90,8 @@ class MT5AlertService:
         
         # Volatility Calculator
         self.volatility_calc = None
-        if Config.ENABLE_VOLATILITY_POSITION_SIZING:
-            self.volatility_calc = VolatilityCalculator(periods=Config.VOLATILITY_PERIODS)
+        if self.config.ENABLE_VOLATILITY_POSITION_SIZING:
+            self.volatility_calc = VolatilityCalculator(periods=self.config.VOLATILITY_PERIODS)
         
         # Notification Manager (will be initialized after telegram is set)
         self.notification_manager = None
@@ -163,7 +164,7 @@ class MT5AlertService:
     async def initialize(self):
         """Initialize MT5 and Telegram connections"""
         # Validate configuration
-        valid, error = Config.validate()
+        valid, error = self.config.validate()
         if not valid:
             logger.error(f"Configuration error: {error}")
             return False
@@ -171,10 +172,10 @@ class MT5AlertService:
         # Initialize MT5
         logger.info("Connecting to MT5...")
         self.mt5_monitor = MT5Monitor(
-            login=Config.MT5_LOGIN,
-            password=Config.MT5_PASSWORD,
-            server=Config.MT5_SERVER,
-            path=Config.MT5_PATH
+            login=self.config.MT5_LOGIN,
+            password=self.config.MT5_PASSWORD,
+            server=self.config.MT5_SERVER,
+            path=self.config.MT5_PATH
         )
         
         if not self.mt5_monitor.connect():
@@ -184,8 +185,8 @@ class MT5AlertService:
         # Initialize Telegram
         logger.info("Initializing Telegram bot...")
         self.telegram = TelegramNotifier(
-            bot_token=Config.TELEGRAM_BOT_TOKEN,
-            chat_id=Config.TELEGRAM_CHAT_ID
+            bot_token=self.config.TELEGRAM_BOT_TOKEN,
+            chat_id=self.config.TELEGRAM_CHAT_ID
         )
         
         # Set MT5 monitor reference for command handlers
@@ -216,12 +217,12 @@ class MT5AlertService:
         self.notification_manager.enable_channel('telegram')
         
         # Register Discord channel if enabled
-        if Config.ENABLE_DISCORD_NOTIFICATIONS and Config.DISCORD_WEBHOOK_URL:
+        if self.config.ENABLE_DISCORD_NOTIFICATIONS and self.config.DISCORD_WEBHOOK_URL:
             if DiscordNotifier is None:
                 logger.warning("Discord notifier not available (aiohttp not installed). Install with: pip install aiohttp")
             else:
                 try:
-                    discord_notifier = DiscordNotifier(Config.DISCORD_WEBHOOK_URL)
+                    discord_notifier = DiscordNotifier(self.config.DISCORD_WEBHOOK_URL)
                     self.notification_manager.register_channel('discord', discord_notifier)
                     self.notification_manager.enable_channel('discord')
                     logger.info("Discord notifications enabled")
@@ -229,16 +230,16 @@ class MT5AlertService:
                     logger.error(f"Failed to initialize Discord notifier: {e}")
         
         # Register Email channel if enabled
-        if (Config.ENABLE_EMAIL_NOTIFICATIONS and Config.EMAIL_SMTP_SERVER and 
-            Config.EMAIL_SENDER and Config.EMAIL_SENDER_PASSWORD and Config.EMAIL_RECIPIENTS):
+        if (self.config.ENABLE_EMAIL_NOTIFICATIONS and self.config.EMAIL_SMTP_SERVER and 
+            self.config.EMAIL_SENDER and self.config.EMAIL_SENDER_PASSWORD and self.config.EMAIL_RECIPIENTS):
             try:
                 email_notifier = EmailNotifier(
-                    smtp_server=Config.EMAIL_SMTP_SERVER,
-                    smtp_port=Config.EMAIL_SMTP_PORT,
-                    sender_email=Config.EMAIL_SENDER,
-                    sender_password=Config.EMAIL_SENDER_PASSWORD,
-                    recipient_emails=Config.EMAIL_RECIPIENTS,
-                    use_tls=Config.EMAIL_USE_TLS
+                    smtp_server=self.config.EMAIL_SMTP_SERVER,
+                    smtp_port=self.config.EMAIL_SMTP_PORT,
+                    sender_email=self.config.EMAIL_SENDER,
+                    sender_password=self.config.EMAIL_SENDER_PASSWORD,
+                    recipient_emails=self.config.EMAIL_RECIPIENTS,
+                    use_tls=self.config.EMAIL_USE_TLS
                 )
                 self.notification_manager.register_channel('email', email_notifier)
                 self.notification_manager.enable_channel('email')
@@ -247,19 +248,19 @@ class MT5AlertService:
                 logger.error(f"Failed to initialize Email notifier: {e}")
         
         # Register Webhook channel if enabled
-        if Config.ENABLE_WEBHOOK_NOTIFICATIONS and Config.WEBHOOK_URL:
+        if self.config.ENABLE_WEBHOOK_NOTIFICATIONS and self.config.WEBHOOK_URL:
             if WebhookNotifier is None:
                 logger.warning("Webhook notifier not available (aiohttp not installed). Install with: pip install aiohttp")
             else:
                 try:
                     import json
                     headers = {}
-                    if Config.WEBHOOK_HEADERS:
+                    if self.config.WEBHOOK_HEADERS:
                         try:
-                            headers = json.loads(Config.WEBHOOK_HEADERS)
+                            headers = json.loads(self.config.WEBHOOK_HEADERS)
                         except:
                             pass
-                    webhook_notifier = WebhookNotifier(Config.WEBHOOK_URL, headers=headers)
+                    webhook_notifier = WebhookNotifier(self.config.WEBHOOK_URL, headers=headers)
                     self.notification_manager.register_channel('webhook', webhook_notifier)
                     self.notification_manager.enable_channel('webhook')
                     logger.info("Webhook notifications enabled")
@@ -267,7 +268,7 @@ class MT5AlertService:
                     logger.error(f"Failed to initialize Webhook notifier: {e}")
         
         # Load price levels
-        self.price_levels = Config.load_price_levels()
+        self.price_levels = self.config.load_price_levels()
         if self.price_levels:
             logger.info(f"Loaded price levels for {len(self.price_levels)} symbols")
             # Initialize triggered_levels with levels that are already crossed
@@ -275,7 +276,7 @@ class MT5AlertService:
             await self._initialize_triggered_levels()
         
         # Initialize monitored symbols from config
-        self.monitored_symbols = set(Config.MONITORED_SYMBOLS)
+        self.monitored_symbols = set(self.config.MONITORED_SYMBOLS)
         logger.info(f"Monitoring synthetic indices: {', '.join(self.monitored_symbols)}")
         
         # Store initial balance for drawdown calculation
@@ -288,7 +289,7 @@ class MT5AlertService:
     
     async def _initialize_triggered_levels(self):
         """Initialize triggered_levels set with levels that are already crossed on startup"""
-        if not Config.ENABLE_PRICE_ALERTS:
+        if not self.config.ENABLE_PRICE_ALERTS:
             return
         
         logger.info("Initializing price level state (marking already-crossed levels as triggered)...")
@@ -309,7 +310,7 @@ class MT5AlertService:
     
     async def check_trades(self):
         """Check for new trades and send alerts"""
-        if not Config.ENABLE_TRADE_ALERTS:
+        if not self.config.ENABLE_TRADE_ALERTS:
             return
         
         new_trades = self.mt5_monitor.get_new_positions()
@@ -324,7 +325,7 @@ class MT5AlertService:
     
     async def check_orders(self):
         """Check for new orders and send alerts"""
-        if not Config.ENABLE_ORDER_ALERTS:
+        if not self.config.ENABLE_ORDER_ALERTS:
             return
         
         new_orders = self.mt5_monitor.get_new_orders()
@@ -335,7 +336,7 @@ class MT5AlertService:
     
     async def check_price_levels(self):
         """Check if price levels have been reached"""
-        if not Config.ENABLE_PRICE_ALERTS:
+        if not self.config.ENABLE_PRICE_ALERTS:
             return
         
         # Check configured price levels
@@ -354,7 +355,7 @@ class MT5AlertService:
                 
                 # Generate price chart if enabled
                 image_data = None
-                if Config.ENABLE_PRICE_CHARTS_IN_ALERTS and self.chart_generator:
+                if self.config.ENABLE_PRICE_CHARTS_IN_ALERTS and self.chart_generator:
                     try:
                         image_data = self.chart_generator.generate_price_chart(
                             symbol=symbol,
@@ -378,7 +379,7 @@ class MT5AlertService:
                     self.triggered_levels.add(level_key)
             
             # Check for level groups
-            if Config.ENABLE_PRICE_LEVEL_GROUPS:
+            if self.config.ENABLE_PRICE_LEVEL_GROUPS:
                 triggered_ids = [alert['level_id'] for alert in triggered]
                 if triggered_ids:
                     group_alerts = self.mt5_monitor.check_level_groups(symbol, levels, triggered_ids)
@@ -395,7 +396,7 @@ class MT5AlertService:
         active_instruments = self.mt5_monitor.get_active_instruments()
         
         # Add synthetic indices from config
-        for symbol in Config.MONITORED_SYMBOLS:
+        for symbol in self.config.MONITORED_SYMBOLS:
             active_instruments.add(symbol)
         
         # Update monitored symbols
@@ -412,7 +413,7 @@ class MT5AlertService:
     
     async def check_pending_order_proximity(self):
         """Check if prices are approaching pending order levels"""
-        if not Config.ENABLE_PENDING_ORDER_ALERTS:
+        if not self.config.ENABLE_PENDING_ORDER_ALERTS:
             return
         
         pending_by_symbol = self.mt5_monitor.get_pending_orders_by_symbol()
@@ -420,7 +421,7 @@ class MT5AlertService:
         for symbol in pending_by_symbol.keys():
             alerts = self.mt5_monitor.check_pending_order_proximity(
                 symbol, 
-                threshold_pct=Config.PENDING_ORDER_PROXIMITY_PCT
+                threshold_pct=self.config.PENDING_ORDER_PROXIMITY_PCT
             )
             
             for alert in alerts:
@@ -433,18 +434,18 @@ class MT5AlertService:
     
     async def check_profit_suggestions(self):
         """Check for profitable positions and suggest partial closes"""
-        if not Config.ENABLE_PROFIT_SUGGESTIONS:
+        if not self.config.ENABLE_PROFIT_SUGGESTIONS:
             return
         
         # Get basic profit suggestions
         suggestions = self.mt5_monitor.analyze_profitable_positions(
-            min_profit=Config.MIN_PROFIT_FOR_SUGGESTION,
-            profit_percentage=Config.PROFIT_PERCENTAGE_THRESHOLD
+            min_profit=self.config.MIN_PROFIT_FOR_SUGGESTION,
+            profit_percentage=self.config.PROFIT_PERCENTAGE_THRESHOLD
         )
         
         # Enhance with ML suggestions if available
         ml_suggestions = {}
-        if self.ml_analyzer and Config.ENABLE_ML_PROFIT_SUGGESTIONS:
+        if self.ml_analyzer and self.config.ENABLE_ML_PROFIT_SUGGESTIONS:
             if self.mt5_monitor and self.mt5_monitor.connected:
                 try:
                     positions = self.mt5_monitor.get_all_positions()
@@ -482,7 +483,7 @@ class MT5AlertService:
     
     async def check_volatility_position_sizing(self):
         """Check position sizes against volatility-based suggestions"""
-        if not Config.ENABLE_VOLATILITY_POSITION_SIZING or not self.volatility_calc:
+        if not self.config.ENABLE_VOLATILITY_POSITION_SIZING or not self.volatility_calc:
             return
         
         if not self.mt5_monitor or not self.mt5_monitor.connected:
@@ -527,14 +528,14 @@ class MT5AlertService:
     
     async def check_risk_alerts(self):
         """Check for risk management alerts"""
-        if not Config.ENABLE_RISK_ALERTS:
+        if not self.config.ENABLE_RISK_ALERTS:
             return
         
         # Check margin level
         margin_alert = self.mt5_monitor.check_margin_level(
-            warning_threshold=Config.MARGIN_LEVEL_WARNING,
-            critical_threshold=Config.MARGIN_LEVEL_CRITICAL,
-            min_balance_threshold=Config.MARGIN_ALERT_MIN_BALANCE
+            warning_threshold=self.config.MARGIN_LEVEL_WARNING,
+            critical_threshold=self.config.MARGIN_LEVEL_CRITICAL,
+            min_balance_threshold=self.config.MARGIN_ALERT_MIN_BALANCE
         )
         if margin_alert:
             alert_key = f"margin_{margin_alert['type']}_{margin_alert['margin_level']:.1f}"
@@ -547,7 +548,7 @@ class MT5AlertService:
         
         # Check position sizes
         position_alerts = self.mt5_monitor.check_position_sizes(
-            max_size_pct=Config.MAX_POSITION_SIZE_PCT
+            max_size_pct=self.config.MAX_POSITION_SIZE_PCT
         )
         for alert in position_alerts:
             alert_key = f"position_size_{alert['ticket']}"
@@ -558,10 +559,10 @@ class MT5AlertService:
                 self.sent_risk_alerts.add(alert_key)
         
         # Check daily loss limit
-        if Config.DAILY_LOSS_LIMIT_PCT > 0 or Config.DAILY_LOSS_LIMIT_AMOUNT > 0:
+        if self.config.DAILY_LOSS_LIMIT_PCT > 0 or self.config.DAILY_LOSS_LIMIT_AMOUNT > 0:
             loss_alert = self.mt5_monitor.check_daily_loss_limit(
-                loss_limit_pct=Config.DAILY_LOSS_LIMIT_PCT,
-                loss_limit_amount=Config.DAILY_LOSS_LIMIT_AMOUNT
+                loss_limit_pct=self.config.DAILY_LOSS_LIMIT_PCT,
+                loss_limit_amount=self.config.DAILY_LOSS_LIMIT_AMOUNT
             )
             if loss_alert:
                 alert_key = f"daily_loss_{loss_alert['type']}"
@@ -572,9 +573,9 @@ class MT5AlertService:
                     self.sent_risk_alerts.add(alert_key)
         
         # Check drawdown
-        if Config.DRAWDOWN_LIMIT_PCT > 0 and self.initial_balance:
+        if self.config.DRAWDOWN_LIMIT_PCT > 0 and self.initial_balance:
             drawdown_alert = self.mt5_monitor.check_drawdown(
-                drawdown_limit_pct=Config.DRAWDOWN_LIMIT_PCT,
+                drawdown_limit_pct=self.config.DRAWDOWN_LIMIT_PCT,
                 initial_balance=self.initial_balance
             )
             if drawdown_alert:
@@ -587,7 +588,7 @@ class MT5AlertService:
     
     async def check_connection_health(self):
         """Check MT5 connection health and alert if disconnected"""
-        if not Config.ENABLE_CONNECTION_HEALTH_MONITORING:
+        if not self.config.ENABLE_CONNECTION_HEALTH_MONITORING:
             return
         
         if not self.mt5_monitor:
@@ -596,7 +597,7 @@ class MT5AlertService:
         # Check connection periodically
         now = datetime.now()
         if (self.last_connection_check is None or 
-            (now - self.last_connection_check).total_seconds() >= Config.CONNECTION_CHECK_INTERVAL):
+            (now - self.last_connection_check).total_seconds() >= self.config.CONNECTION_CHECK_INTERVAL):
             
             is_connected = self.mt5_monitor.check_connection()
             self.last_connection_check = now
@@ -671,13 +672,13 @@ class MT5AlertService:
             return False
         
         # Check rate limiting
-        if Config.ENABLE_ALERT_RATE_LIMITING:
+        if self.config.ENABLE_ALERT_RATE_LIMITING:
             if not self.rate_limiter.can_send_alert():
                 logger.warning(f"Alert rate limit exceeded, dropping alert: {alert_type}")
                 return False
         
         # Handle grouping (only for text-only, non-critical alerts)
-        if Config.ENABLE_ALERT_GROUPING and use_grouping and priority != 'critical' and not image_data:
+        if self.config.ENABLE_ALERT_GROUPING and use_grouping and priority != 'critical' and not image_data:
             should_send_batch = self.alert_grouper.add_alert(alert_type, {'message': message})
             
             if should_send_batch:
@@ -771,7 +772,7 @@ class MT5AlertService:
     
     async def check_daily_summary(self):
         """Check if it's time to send daily performance summary"""
-        if not Config.ENABLE_DAILY_SUMMARY:
+        if not self.config.ENABLE_DAILY_SUMMARY:
             return
         
         now = datetime.now()
@@ -783,7 +784,7 @@ class MT5AlertService:
         # If we haven't sent today's summary yet
         if self.last_daily_summary_date != current_date:
             # Check if current time is at or past the configured summary time
-            summary_time = now.replace(hour=Config.DAILY_SUMMARY_HOUR, minute=Config.DAILY_SUMMARY_MINUTE, second=0, microsecond=0)
+            summary_time = now.replace(hour=self.config.DAILY_SUMMARY_HOUR, minute=self.config.DAILY_SUMMARY_MINUTE, second=0, microsecond=0)
             
             # If we're past the summary time for today, send it
             if now >= summary_time:
@@ -802,7 +803,7 @@ class MT5AlertService:
     
     async def update_dynamic_levels(self):
         """Auto-detect and update dynamic support/resistance levels"""
-        if not Config.ENABLE_DYNAMIC_LEVELS:
+        if not self.config.ENABLE_DYNAMIC_LEVELS:
             return
         
         from datetime import timedelta
@@ -812,7 +813,7 @@ class MT5AlertService:
         # Check if it's time to update (based on configured interval)
         if self.last_dynamic_levels_update:
             hours_since_update = (now - self.last_dynamic_levels_update).total_seconds() / 3600
-            if hours_since_update < Config.DYNAMIC_LEVELS_AUTO_UPDATE_HOURS:
+            if hours_since_update < self.config.DYNAMIC_LEVELS_AUTO_UPDATE_HOURS:
                 return
         else:
             # First run, update immediately
@@ -821,7 +822,7 @@ class MT5AlertService:
         logger.info("Updating dynamic support/resistance levels...")
         
         # Get symbols to analyze (from monitored symbols or active instruments)
-        symbols_to_analyze = set(Config.MONITORED_SYMBOLS)
+        symbols_to_analyze = set(self.config.MONITORED_SYMBOLS)
         active_instruments = self.mt5_monitor.get_active_instruments()
         symbols_to_analyze.update(active_instruments)
         
@@ -830,10 +831,10 @@ class MT5AlertService:
             try:
                 levels = self.mt5_monitor.detect_support_resistance(
                     symbol=symbol,
-                    timeframe=Config.DYNAMIC_LEVELS_TIMEFRAME,
-                    periods=Config.DYNAMIC_LEVELS_PERIODS,
-                    min_touches=Config.DYNAMIC_LEVELS_MIN_TOUCHES,
-                    tolerance_pct=Config.DYNAMIC_LEVELS_TOLERANCE_PCT
+                    timeframe=self.config.DYNAMIC_LEVELS_TIMEFRAME,
+                    periods=self.config.DYNAMIC_LEVELS_PERIODS,
+                    min_touches=self.config.DYNAMIC_LEVELS_MIN_TOUCHES,
+                    tolerance_pct=self.config.DYNAMIC_LEVELS_TOLERANCE_PCT
                 )
                 
                 # Add detected levels to price_levels.json
@@ -877,7 +878,7 @@ class MT5AlertService:
         
         if updated_count > 0:
             # Save updated levels
-            Config.save_price_levels(self.price_levels)
+            self.config.save_price_levels(self.price_levels)
             logger.info(f"Updated dynamic levels for {updated_count} symbols")
         
         self.last_dynamic_levels_update = now
@@ -890,7 +891,7 @@ class MT5AlertService:
         
         self.running = True
         logger.info("MT5 Alert Service started. Monitoring trades, orders, and price levels...")
-        logger.info(f"Monitoring synthetic indices: {', '.join(Config.MONITORED_SYMBOLS)}")
+        logger.info(f"Monitoring synthetic indices: {', '.join(self.config.MONITORED_SYMBOLS)}")
         
         # Counter for periodic tasks
         check_counter = 0
@@ -935,15 +936,15 @@ class MT5AlertService:
                     await self.check_connection_health()
                 
                 # Clear old batched alerts periodically
-                if Config.ENABLE_ALERT_GROUPING and check_counter % 12 == 0:
+                if self.config.ENABLE_ALERT_GROUPING and check_counter % 12 == 0:
                     self.alert_grouper.clear_old_alerts()
                 
                 # Update dynamic levels (every 360 cycles = ~30 minutes)
-                if Config.ENABLE_DYNAMIC_LEVELS and check_counter % 360 == 0:
+                if self.config.ENABLE_DYNAMIC_LEVELS and check_counter % 360 == 0:
                     await self.update_dynamic_levels()
                 
                 # Wait before next check
-                await asyncio.sleep(Config.PRICE_CHECK_INTERVAL)
+                await asyncio.sleep(self.config.PRICE_CHECK_INTERVAL)
                 check_counter += 1
         
         except KeyboardInterrupt:
