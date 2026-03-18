@@ -1391,7 +1391,94 @@ class MT5Monitor:
             'total_profit': total_profit,
             'errors': errors if errors else None
         }
-    
+
+    def cancel_order(self, ticket: int) -> Dict:
+        """
+        Cancel a pending order
+
+        Args:
+            ticket: Order ticket number
+
+        Returns:
+            Dictionary with success status and details
+        """
+        if not self.connected:
+            return {'success': False, 'error': 'Not connected to MT5'}
+
+        order = mt5.orders_get(ticket=ticket)
+        if not order:
+            return {'success': False, 'error': f'Order {ticket} not found'}
+        order = order[0]
+
+        request = {
+            "action": mt5.TRADE_ACTION_REMOVE,
+            "order": ticket,
+            "comment": "Cancelled via Telegram",
+        }
+
+        result = mt5.order_send(request)
+
+        if result is None:
+            return {
+                'success': False,
+                'error': f'Failed to cancel order: order_send returned None (last_error={mt5.last_error()})'
+            }
+
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            return {
+                'success': False,
+                'error': f'Failed to cancel order: {result.comment}',
+                'retcode': result.retcode
+            }
+
+        return {
+            'success': True,
+            'ticket': ticket,
+            'symbol': order.symbol,
+            'type': order.type,
+            'price': order.price_open,
+            'volume': order.volume_initial
+        }
+
+    def cancel_all_orders(self) -> Dict:
+        """
+        Cancel all pending orders
+
+        Returns:
+            Dictionary with results summary
+        """
+        if not self.connected:
+            return {'success': False, 'error': 'Not connected to MT5'}
+
+        orders = mt5.orders_get()
+        if not orders or len(orders) == 0:
+            return {
+                'success': True,
+                'cancelled_count': 0,
+                'total_orders': 0,
+                'message': 'No pending orders to cancel'
+            }
+
+        cancelled_count = 0
+        failed_count = 0
+        errors = []
+
+        for order in orders:
+            result = self.cancel_order(order.ticket)
+            if result.get('success'):
+                cancelled_count += 1
+            else:
+                failed_count += 1
+                errors.append(f"Ticket {order.ticket}: {result.get('error', 'Unknown error')}")
+
+        return {
+            'success': cancelled_count > 0,
+            'cancelled_count': cancelled_count,
+            'failed_count': failed_count,
+            'total_orders': len(orders),
+            'errors': errors if errors else None
+        }
+
     def modify_position(self, ticket: int, sl: float = None, tp: float = None) -> Dict:
         """
         Modify stop loss and/or take profit for a position
