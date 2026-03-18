@@ -127,6 +127,26 @@ class Config:
         self.WEBHOOK_URL = os.getenv('WEBHOOK_URL', '')
         self.WEBHOOK_HEADERS = os.getenv('WEBHOOK_HEADERS', '')
 
+        # Grid / DCA Tracking
+        self.ENABLE_GRID_DCA_ALERTS = os.getenv('ENABLE_GRID_DCA_ALERTS', 'true').lower() == 'true'
+
+        # Correlation Alerts
+        self.ENABLE_CORRELATION_ALERTS = os.getenv('ENABLE_CORRELATION_ALERTS', 'false').lower() == 'true'
+        raw_pairs = os.getenv('CORRELATION_PAIRS', 'XAUUSD:XAGUSD')
+        self.CORRELATION_PAIRS = [
+            tuple(p.strip().split(':')) for p in raw_pairs.split(',')
+            if ':' in p.strip()
+        ]
+        self.CORRELATION_LOOKBACK_BARS = int(os.getenv('CORRELATION_LOOKBACK_BARS', '50'))
+        self.CORRELATION_ALERT_THRESHOLD = float(os.getenv('CORRELATION_ALERT_THRESHOLD', '0.5'))
+
+        # Economic Calendar / News Alerts
+        self.ENABLE_NEWS_ALERTS = os.getenv('ENABLE_NEWS_ALERTS', 'true').lower() == 'true'
+        self.NEWS_MIN_IMPACT = os.getenv('NEWS_MIN_IMPACT', 'High')  # Low, Medium, or High
+        self.NEWS_ALERT_ADVANCE_MINUTES = int(os.getenv('NEWS_ALERT_ADVANCE_MINUTES', '15'))
+        # Comma-separated currency codes (e.g. USD,EUR). Leave empty to auto-detect from active positions/symbols.
+        self.NEWS_CURRENCIES = [c.strip().upper() for c in os.getenv('NEWS_CURRENCIES', '').split(',') if c.strip()]
+
     def load_price_levels(self) -> Dict[str, List[Dict]]:
         """Load price level configurations from JSON file"""
         paths = ['data/price_levels.json', 'price_levels.json']

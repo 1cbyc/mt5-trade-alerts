@@ -15,6 +15,8 @@ from ..analytics.trade_history import TradeHistoryDB
 from ..analytics.chart_generator import ChartGenerator
 from ..analytics.ml_profit_analyzer import MLProfitAnalyzer
 from ..analytics.volatility_calculator import VolatilityCalculator
+from ..analytics.economic_calendar import EconomicCalendar, get_currencies_from_symbols
+from ..analytics.correlation_tracker import CorrelationTracker
 from ..utils.config import Config
 
 # Optional imports for Discord and Webhook (require aiohttp)
@@ -94,7 +96,27 @@ class MT5AlertService:
         self.volatility_calc = None
         if self.config.ENABLE_VOLATILITY_POSITION_SIZING:
             self.volatility_calc = VolatilityCalculator(periods=self.config.VOLATILITY_PERIODS)
-        
+
+        # Grid/DCA state — track known multi-position groups to detect new additions
+        self.known_grid_groups: Dict[tuple, int] = {}  # (symbol, direction) → position count
+
+        # Correlation Tracker
+        self.correlation_tracker = None
+        if self.config.ENABLE_CORRELATION_ALERTS and self.config.CORRELATION_PAIRS:
+            self.correlation_tracker = CorrelationTracker(
+                pairs=self.config.CORRELATION_PAIRS,
+                lookback_bars=self.config.CORRELATION_LOOKBACK_BARS,
+                alert_threshold=self.config.CORRELATION_ALERT_THRESHOLD,
+            )
+
+        # Economic Calendar
+        self.economic_calendar = None
+        if self.config.ENABLE_NEWS_ALERTS:
+            self.economic_calendar = EconomicCalendar(
+                min_impact=self.config.NEWS_MIN_IMPACT,
+                advance_minutes=self.config.NEWS_ALERT_ADVANCE_MINUTES,
+            )
+
         # Notification Manager (will be initialized after telegram is set)
         self.notification_manager = None
     
@@ -202,6 +224,10 @@ class MT5AlertService:
         if self.volatility_calc:
             self.telegram.volatility_calc = self.volatility_calc
         self.telegram.alert_service = self
+        if self.economic_calendar:
+            self.telegram.economic_calendar = self.economic_calendar
+        if self.correlation_tracker:
+            self.telegram.correlation_tracker = self.correlation_tracker
 
         # Setup command handlers
         await self.telegram.setup_commands()
@@ -826,7 +852,7 @@ class MT5AlertService:
                     logger.info(f"Auto break-even applied: ticket {ticket} ({pos.symbol})")
                     message = (
                         f"🔒 <b>Auto Break-Even Applied</b>\n\n"
-                        f"Ticket: {ticket}\n"
+                        f"Ticket: <code>{ticket}</code>\n"
                         f"Symbol: {pos.symbol}\n"
                         f"Entry: {pos.price_open}\n"
                         f"Current: {pos.price_current:.{symbol_info.digits}f}\n"
@@ -878,6 +904,80 @@ class MT5AlertService:
         for ticket in closed_tickets:
             del self.trailing_stops[ticket]
             logger.info(f"Trailing stop removed for closed position {ticket}")
+
+    async def check_grid_dca_alerts(self):
+        """Alert when a new position is added to a symbol that already has open positions."""
+        if not self.config.ENABLE_GRID_DCA_ALERTS:
+            return
+        if not self.mt5_monitor or not self.mt5_monitor.connected:
+            return
+
+        try:
+            groups = self.mt5_monitor.analyze_grid_dca()
+            for group in groups:
+                key = (group['symbol'], group['direction'])
+                prev_count = self.known_grid_groups.get(key, 0)
+                current_count = group['count']
+
+                if current_count != prev_count:
+                    self.known_grid_groups[key] = current_count
+                    # Only alert if this is an update (not first detection on startup)
+                    if prev_count > 0:
+                        action = "added to" if current_count > prev_count else "reduced in"
+                        logger.info(f"Grid/DCA update: {group['symbol']} {group['direction']} — {current_count} positions")
+                        message = self.telegram.format_grid_dca_alert(group, action)
+                        await self._send_alert_safe(message, alert_type='trade', priority='important')
+                    else:
+                        # First detection — just record, no alert (avoid startup spam)
+                        pass
+                else:
+                    self.known_grid_groups[key] = current_count
+
+            # Clean up closed groups
+            active_keys = {(g['symbol'], g['direction']) for g in groups}
+            for key in list(self.known_grid_groups.keys()):
+                if key not in active_keys:
+                    del self.known_grid_groups[key]
+
+        except Exception as e:
+            logger.error(f"Error checking grid/DCA alerts: {e}")
+
+    async def check_correlation_alerts(self):
+        """Alert when normally-correlated pairs diverge."""
+        if not self.config.ENABLE_CORRELATION_ALERTS or not self.correlation_tracker:
+            return
+
+        try:
+            alerts = self.correlation_tracker.check_divergences()
+            for alert in alerts:
+                logger.info(f"Correlation divergence: {alert['symbol_a']} / {alert['symbol_b']} r={alert['correlation']}")
+                message = self.telegram.format_correlation_alert(alert)
+                await self._send_alert_safe(message, alert_type='risk', priority='important')
+        except Exception as e:
+            logger.error(f"Error checking correlation alerts: {e}")
+
+    async def check_news_alerts(self):
+        """Alert before high-impact economic calendar events."""
+        if not self.config.ENABLE_NEWS_ALERTS or not self.economic_calendar:
+            return
+
+        # Determine which currencies to watch
+        currencies = list(self.config.NEWS_CURRENCIES)
+        if not currencies:
+            currencies = get_currencies_from_symbols(list(self.monitored_symbols))
+        if not currencies:
+            return
+
+        try:
+            upcoming = self.economic_calendar.get_upcoming_alerts(currencies)
+            for event in upcoming:
+                event_key = event['event_key']
+                message = self.telegram.format_news_alert(event)
+                await self._send_alert_safe(message, alert_type='news', priority='important')
+                self.economic_calendar.mark_alerted(event_key)
+                logger.info(f"News alert sent: {event.get('title')} ({event.get('country')}) in {event.get('minutes_until')} min")
+        except Exception as e:
+            logger.error(f"Error checking news alerts: {e}")
 
     async def check_daily_summary(self):
         """Check if it's time to send daily performance summary"""
@@ -1023,6 +1123,14 @@ class MT5AlertService:
                 # Check pending order proximity (every 2 cycles = ~10 seconds)
                 if check_counter % 2 == 0:
                     await self.check_pending_order_proximity()
+
+                # Check grid/DCA (every 2 cycles = ~10 seconds)
+                if check_counter % 2 == 0:
+                    await self.check_grid_dca_alerts()
+
+                # Check correlation divergence (every 60 cycles = ~5 minutes)
+                if check_counter % 60 == 0:
+                    await self.check_correlation_alerts()
                 
                 # Check profit suggestions (every 3 cycles = ~15 seconds)
                 if check_counter % 3 == 0:
@@ -1043,6 +1151,10 @@ class MT5AlertService:
                 if check_counter % 10 == 0:
                     await self.check_risk_alerts()
                 
+                # Check news/economic calendar alerts (every 12 cycles = ~60 seconds)
+                if check_counter % 12 == 0:
+                    await self.check_news_alerts()
+
                 # Check daily summary (every 12 cycles = ~60 seconds - check once per minute)
                 if check_counter % 12 == 0:
                     await self.check_daily_summary()
@@ -1058,6 +1170,14 @@ class MT5AlertService:
                 # Update dynamic levels (every 360 cycles = ~30 minutes)
                 if self.config.ENABLE_DYNAMIC_LEVELS and check_counter % 360 == 0:
                     await self.update_dynamic_levels()
+
+                # Clean up economic calendar alerted set (every 360 cycles = ~30 minutes)
+                if self.economic_calendar and check_counter % 360 == 0:
+                    self.economic_calendar.clean_old_alerts()
+
+                # Clean up correlation tracker alerted set (every 360 cycles = ~30 minutes)
+                if self.correlation_tracker and check_counter % 360 == 0:
+                    self.correlation_tracker.clean_old_alerts()
                 
                 # Wait before next check
                 await asyncio.sleep(self.config.PRICE_CHECK_INTERVAL)
